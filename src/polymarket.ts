@@ -28,6 +28,7 @@ export class PolymarketClient {
       description: stringOrUndefined(event.description), resolutionSource: stringOrUndefined(event.resolutionSource),
       endDate: stringOrUndefined(event.endDate), closed: booleanOrUndefined(event.closed),
       active: booleanOrUndefined(event.active), volume: numberOrString(event.volume), liquidity: numberOrString(event.liquidity),
+      negRisk: booleanOrUndefined(event.negRisk),
       markets: Array.isArray(event.markets) ? event.markets as PolymarketEvent["markets"] : [], raw: item,
     };
   }

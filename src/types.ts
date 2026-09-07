@@ -63,6 +63,9 @@ export interface PolymarketMarket {
   outcomePrices?: string[] | string;
   endDate?: string;
   closed?: boolean;
+  active?: boolean;
+  archived?: boolean;
+  groupItemTitle?: string;
 }
 
 export interface PolymarketEvent {
@@ -76,6 +79,7 @@ export interface PolymarketEvent {
   active?: boolean;
   volume?: number | string;
   liquidity?: number | string;
+  negRisk?: boolean;
   markets?: PolymarketMarket[];
   raw: unknown;
 }
@@ -89,6 +93,8 @@ export interface SourceDocument {
   sourceTier?: 1 | 2 | 3 | 4;
   retrievalKind?: "page" | "snippet";
   retrievalError?: string;
+  /** Structured, identity-checked underlying market snapshot, never a target market. */
+  dependencyOf?: string;
 }
 
 export interface SearchProvider {
@@ -133,6 +139,29 @@ export interface ResearchRun {
   limitations: string[];
   generation?: { model: string; thinking?: boolean; maxOutputTokens: number; finishReason?: string; promptCharacters: number };
   promptMessages?: ChatMessage[];
+  decomposition?: {
+    units: ResearchUnit[];
+    dossiers: ResearchDossier[];
+    limitations: string[];
+    raceOdds?: import("./senate-evidence.ts").RaceOddsSnapshot[];
+    senateRoster?: import("./senate-evidence.ts").SenateRoster;
+  };
+}
+
+export interface ResearchUnit {
+  name: string;
+  kind: "candidate" | "unlisted_candidate" | "race" | "dependency" | "discovery";
+  question: string;
+  queries: string[];
+}
+
+export interface ResearchDossier {
+  unit: ResearchUnit;
+  reportMarkdown: string;
+  narrativeMarkdown?: string;
+  sourceNumbers: number[];
+  status: StopReason;
+  promptMessages: ChatMessage[];
 }
 
 export interface ResearchMarketRequest {

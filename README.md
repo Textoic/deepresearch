@@ -1,5 +1,75 @@
 # budget-researcher
 
+## Prediction-market research without target-odds anchoring
+
+Market prompts exclude market/expert probabilities, rankings, favorites, and price
+commentary about the target event or its named candidate outcomes. Target prices
+are omitted from writer metadata; obvious target-forecast passages are filtered
+from writer evidence. Raw snapshots retain prices for auditing. Sentence filtering
+is conservative and the semantic exclusion also depends on the writer following
+the prompt; this is not a guarantee against every paraphrase of target odds.
+
+Reference odds for distinct causal dependencies are allowed and encouraged: for
+Senate control, an individual state Senate race is a dependency. The writer must
+give the proposition, source, date, and limitations, distinguish polling shares
+from win probabilities, and avoid treating correlated races as independent. Target
+event probabilities are left to a subsequent forecasting step. General-topic
+research is not subject to this market-specific policy.
+
+Markets with `active: false`, `closed: true`, or `archived: true` are removed from
+the research roster before queries and prompts. Raw Gamma data remains intact.
+An empty dedicated resolution-source field can use explicit authority paragraphs
+from eligible descriptions; absent authorities still stop research.
+
+For non-Arena markets, `--effort high` now runs component research followed by a
+synthesis. The 2026 Senate strategy verifies a checklist of 33 regular races and
+the Florida/Ohio special elections, with two queries and a separate dossier for
+each race. This dated checklist is not a general future-election schedule adapter.
+Multi-candidate events with identifiable names research every eligible candidate
+separately, search for up to five evidence-backed unlisted candidates, and research
+those additional leads too. A second discovery audit after the listed-candidate
+dossiers examines the expanded evidence and may add up to five further supported
+names. Other events use a bounded discovery call to propose
+up to six causal dependencies. Candidate-name extraction currently uses
+`groupItemTitle` or `Will NAME be/become the next ...` questions.
+
+Each component uses two queries (up to four results per query) and up to 1,600
+output tokens, with one budget-reserved 2,400-token retry if truncated. Discovery uses at most 2,200 output tokens. Every call shares the
+run's inference budget guard. A large candidate roster therefore costs more local
+compute or cloud budget than a single-pass report. Search is host-funded and its
+total grows with the eligible roster. Failed/incomplete component work is disclosed
+and cannot produce a `complete` run status. Custom queries replace the initial
+searches, not the component searches.
+
+`decomposition.json` saves the unit roster, source numbers, separate prompts,
+reports and statuses. `dossiers/` contains individual Markdown reports. The final
+`report.md` includes the synthesis and full dossiers; synthesis sees bounded
+excerpts ending at line boundaries to preserve citation URLs. Bare source-number
+references are linked mechanically to saved URLs; this is not entailment checking.
+Replay reuses frozen dossiers
+without new searches or component calls. It does not re-research the components.
+
+Senate race prices are fetched directly from Gamma and accepted only after checking
+the race's state, year, event identity, eligible outcome flags, and YES-outcome
+index. The final race-odds table is rendered from these structured values, outside
+the model narrative. Market website pages are withheld from writer context because
+navigation and related-event widgets can expose target odds even on race pages.
+Expert forecasts for distinct underlying races remain permitted.
+
+An optional captured full table from `https://www.senate.gov/senators/` establishes
+current holders and fixed/contested party counts. The parser requires all 100 unique
+state/class seats and 35 contested seats, including the two specified specials.
+The report computes conditional seat-count identities from this roster. If the
+roster is absent, the baseline is withheld. The reviewed September 7 batch supplies
+a browser-captured official roster because direct HTTP requests to the Senate site
+returned access-denied pages. The roster is a current snapshot, not proof of future
+Election Day affiliations. Independents' future caucus choices remain uncertain.
+When a validated Senate roster is available, the aggregate report is assembled in
+code from the exact contract, race-quote table, conditional flip/hold scenarios,
+and full model-written race dossiers. It makes no additional aggregate LLM call:
+the local writer repeatedly contradicted the independent-caucus arithmetic even
+when supplied with correct counts. Dossier prose still requires factual review.
+
 ## General research and source adapters
 
 `ResearchClient.researchTopic({ topic, budgetUsd, sources?, sourceUrls?, effort?, evidencePolicy? })`
@@ -29,12 +99,12 @@ const run = await client.researchTopic({
 });
 ```
 
-Effort currently controls bounded search coverage: low = 2, medium = 4, high = 6
+For general topics and single-pass research, effort controls bounded search coverage: low = 2, medium = 4, high = 6
 queries, with up to six results per query. Medium adds recent developments and
 counterevidence; high adds historical data and methodology/alternative explanations.
 Explicit queries replace these defaults (up to eight unique nonempty queries).
-This is a deterministic retrieval policy, **not yet an iterative planner/critic**.
-The report still uses one budgeted inference call. Search/adapters remain host-funded;
+This base retrieval policy is deterministic. High-effort non-Arena market research
+adds the component/discovery calls described above; other reports use one budgeted inference call. Search/adapters remain host-funded;
 `budgetUsd` caps inference reservations, not all external service charges.
 
 The market CLI accepts `--effort low|medium|high` and

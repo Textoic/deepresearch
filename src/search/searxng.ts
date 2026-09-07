@@ -36,8 +36,12 @@ export class SearxngSearchProvider implements SearchProvider {
       if (!response.ok) throw new Error(String(response.status));
       const contentType = response.headers.get("content-type") ?? "";
       if (!contentType.startsWith("text/")) throw new Error(`Unsupported page type: ${contentType}`);
-      const text = contentType.includes("text/html") ? stripHtml((await response.text()).slice(0, 1_000_000)) : (await response.text()).slice(0, 200_000);
-      return { url: result.url!, title: result.title, text: text || result.content || "", publishedAt: result.publishedDate, retrievedAt, sourceTier: 2, retrievalKind: "page" };
+      const raw = (await response.text()).slice(0, 1_000_000);
+      const text = contentType.includes("text/html") ? stripHtml(raw) : raw.slice(0, 200_000);
+      if (!text.trim() || (text.length < 120 && /(?:facebook|reddit)\.com/i.test(result.url!)) || /prove your humanity|verify you are human|access denied|enable javascript and cookies/i.test(text.slice(0, 1500))) throw new Error("Blocked or empty page; preserving discovery snippet only");
+      const date = raw.match(/<meta[^>]+(?:property|name)=["'](?:article:published_time|datePublished|pubdate)["'][^>]+content=["']([^"']+)/i)?.[1];
+      const publishedAt = result.publishedDate ?? (date && Number.isFinite(Date.parse(date)) ? new Date(date).toISOString() : undefined);
+      return { url: result.url!, title: result.title, text: text || result.content || "", publishedAt, retrievedAt, sourceTier: 2, retrievalKind: "page" };
     } catch (error) {
       // Search snippets are still useful discovery evidence; the report must label the limitation.
       return { url: result.url!, title: result.title, text: result.content ?? "", publishedAt: result.publishedDate, retrievedAt, sourceTier: 2, retrievalKind: "snippet", retrievalError: String(error) };
