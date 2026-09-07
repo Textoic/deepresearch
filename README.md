@@ -1,5 +1,93 @@
 # budget-researcher
 
+## General research and source adapters
+
+`ResearchClient.researchTopic({ topic, budgetUsd, sources?, sourceUrls?, effort?, evidencePolicy? })`
+researches a general question without fetching Polymarket metadata or requiring market
+resolution rules. Market research still uses `researchMarket`. Generic prompts no
+longer contain Arena-specific lab, launch, or ranking instructions. Nested market
+descriptions and deadlines are included when researching a market.
+
+```ts
+import { ResearchClient, OllamaProvider, SearxngSearchProvider,
+  PythSourceAdapter, PortWatchSourceAdapter } from "budget-researcher";
+
+const client = new ResearchClient({
+  provider: new OllamaProvider("your-local-model"),
+  searchProvider: new SearxngSearchProvider({ baseUrl: "http://127.0.0.1:8080" }),
+  // Optional: configure only the adapters relevant to this research context.
+  sourceAdapters: [
+    // new PythSourceAdapter({ feedId: exactFeedId, apiKey: process.env.PYTH_API_KEY! }),
+    // new PortWatchSourceAdapter({ portId: exactPortId }),
+  ],
+});
+const run = await client.researchTopic({
+  topic: "What explains recent changes in shipping through the Strait of Hormuz?",
+  sourceUrls: ["https://portwatch.imf.org/"],
+  budgetUsd: 0,
+  effort: "medium",
+});
+```
+
+Effort currently controls bounded search coverage: low = 2, medium = 4, high = 6
+queries, with up to six results per query. Medium adds recent developments and
+counterevidence; high adds historical data and methodology/alternative explanations.
+Explicit queries replace these defaults (up to eight unique nonempty queries).
+This is a deterministic retrieval policy, **not yet an iterative planner/critic**.
+The report still uses one budgeted inference call. Search/adapters remain host-funded;
+`budgetUsd` caps inference reservations, not all external service charges.
+
+The market CLI accepts `--effort low|medium|high` and
+`--evidence-policy disclose|strict`. General topics and adapter configuration are
+currently library APIs. `sourceUrls` supplies routing context, not automatic page
+retrieval; configure search, an adapter, or pass captured `sources`.
+
+Evidence is filtered before deduplication, so future-dated duplicates cannot hide
+eligible snapshots. A full page replaces a snippet at the same canonical URL;
+fragments and known tracking parameters are removed for identity, while semantic
+query parameters remain distinct. This is URL deduplication, not event-level or
+syndication deduplication. `run.retrieval` and `retrieval.json` record search failures,
+adapter outcomes, and excluded sources. Ordinary search continues when an adapter
+fails. Missing market resolution rules now prevent retrieval as well as generation.
+
+`disclose` preserves unknown-date evidence with explicit limitations. `strict`
+requires both a valid publication timestamp and a snapshot retrieved no later than
+the cutoff. Thus a current retrieval of an old page cannot silently pass as a
+historical snapshot. Timestamp assertions remain supplied by the caller/search
+provider; this does not authenticate archives or eliminate model training leakage.
+
+Adapters implement `SourceAdapter` and return ordinary evidence plus limitations.
+Routing uses exact URL hosts from source/rule context. Adapters receive an abort
+signal and must honor it; custom search providers must also honor their signal.
+Replay never runs adapters or searches. Built-in adapters are opt-in:
+
+- **Pyth:** requires an exact feed ID and API key. Uses the upgraded Hermes endpoint,
+  preserves decimal precision, confidence magnitude, publication time, and raw price
+  fields; rejects stale/future latest observations and mismatched feed responses.
+  The default freshness window is 300 seconds and can be overridden explicitly.
+  `search=WTI` does not establish asset/currency/contract identity. No historical
+  threshold crossing is inferred from a latest quote.
+- **PortWatch:** adapts the predictor reference's ArcGIS retrieval using an explicit
+  port ID. Retrieves up to 30 daily transit-call records; computes the latest mean
+  only for seven consecutive calendar days. Null counts are rejected, not treated
+  as zero. Dates are observation dates; publication/revision times remain unknown,
+  so strict historical policy excludes these current snapshots.
+- **Arena:** retains the existing exact-board parser and chronology checks. Generic
+  evidence remains in the prompt alongside the specialized brief. Broader board
+  layouts and automatic browser extraction remain future work.
+- **SecondMarket:** no endpoint or authenticated valuation parser is implemented.
+  Supply captured evidence or a custom adapter; price per share, implied valuation,
+  funding-round valuation, and indications of interest must remain distinct.
+
+Implementation reference: `predictor/src/research/source-adapters` (Arena and
+PortWatch). Pyth API reference checked September 7, 2026:
+[Fetch price updates](https://docs.pyth.network/price-feeds/core/fetch-price-updates).
+No paid live adapter or cloud inference calls were used for the regression fixtures.
+
+Next general-engine priorities: budget-reserved planning/critique rounds, structured
+claims with passage-level provenance and citation verification, event-level evidence
+deduplication, and evaluation fixtures independent of the writer's answer key.
+
 A TypeScript/Node library for generating evidence-led research reports without crossing a configured inference budget. It is deliberately library-first: the CLI is only a thin wrapper around `ResearchClient`.
 
 ## What the MVP does

@@ -126,6 +126,7 @@ export interface ResearchRun {
   reportMarkdown: string;
   /** Unmodified model output; reportMarkdown may also contain deterministic data tables. */
   narrativeMarkdown?: string;
+  retrieval?: { searches: Array<{ query: string; status: "complete" | "failed"; documents: number }>; adapters: import("./source-adapters.ts").AdapterDiagnostic[]; excluded: import("./evidence.ts").EvidenceDecision[]; policy: import("./evidence.ts").EvidencePolicy };
   arenaEvidence?: { snapshot: ArenaSnapshot; brief: ArenaEvidenceBrief };
   ledger: RunLedger;
   stopReason: StopReason;
@@ -146,6 +147,14 @@ export interface ResearchMarketRequest {
   maxOutputTokens?: number;
   thinking?: boolean;
   queries?: string[];
+  evidencePolicy?: import("./evidence.ts").EvidencePolicy;
+  /** Bounded query coverage; does not increase the inference budget. */
+  effort?: "low" | "medium" | "high";
+}
+
+export interface ResearchTopicRequest extends Omit<ResearchMarketRequest, "slug"> {
+  topic: string;
+  sourceUrls?: string[];
 }
 
 export interface RunStore {

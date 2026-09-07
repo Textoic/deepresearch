@@ -15,6 +15,7 @@ export class FileRunStore implements RunStore {
       writeFile(join(directory, "report.md"), run.reportMarkdown, "utf8"),
       writeFile(join(directory, "ledger.json"), JSON.stringify(run.ledger, null, 2), "utf8"),
       writeFile(join(directory, "event.json"), JSON.stringify(run.event?.raw ?? null, null, 2), "utf8"),
+      writeFile(join(directory, "retrieval.json"), JSON.stringify(run.retrieval ?? null, null, 2), "utf8"),
       writeFile(join(directory, "evidence.json"), JSON.stringify(run.sources, null, 2), "utf8"),
       writeFile(join(directory, "prompt.json"), JSON.stringify(run.promptMessages ?? [], null, 2), "utf8"),
       ...(run.arenaEvidence ? [writeFile(join(directory, "structured-evidence.json"), JSON.stringify(run.arenaEvidence, null, 2), "utf8")] : []),

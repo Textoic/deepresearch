@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 
-export const USAGE = "Usage: budget-research market <slug> --provider ollama|openrouter --model <model> --budget <usd> [--ollama-url <url>] [--searxng-url <url>] [--eval-file <json> --eval-case <id>] [--as-of <date>] [--source <url>] [--query <query>] [--max-output-tokens <count>] [--replay-run <directory>] [--out <dir>]";
+export const USAGE = "Usage: budget-research market <slug> --provider ollama|openrouter --model <model> --budget <usd> [--ollama-url <url>] [--searxng-url <url>] [--eval-file <json> --eval-case <id>] [--as-of <date>] [--source <url>] [--query <query>] [--max-output-tokens <count>] [--effort low|medium|high] [--evidence-policy disclose|strict] [--replay-run <directory>] [--out <dir>]";
 
 export function parseCliArgs(argv: string[]) {
   // pnpm/npm may forward a separator to the script itself.
@@ -13,6 +13,8 @@ export function parseCliArgs(argv: string[]) {
     "as-of": { type: "string" }, "api-key": { type: "string" },
     source: { type: "string", multiple: true }, out: { type: "string" },
     query: { type: "string", multiple: true },
+    effort: { type: "string" },
+    "evidence-policy": { type: "string" },
     "max-output-tokens": { type: "string" },
     "replay-run": { type: "string" },
   } });
@@ -26,9 +28,13 @@ export function parseCliArgs(argv: string[]) {
   if (asOf && Number.isNaN(asOf.getTime())) throw new Error("--as-of must be a valid date.");
   if (values["eval-case"] && !values["eval-file"]) throw new Error("--eval-case requires --eval-file.");
   const maxOutputTokens = Number(values["max-output-tokens"] ?? 4096);
+  const effort = values.effort ?? "low";
+  if (effort !== "low" && effort !== "medium" && effort !== "high") throw new Error("--effort must be low, medium, or high.");
+  const evidencePolicy = values["evidence-policy"] ?? "disclose";
+  if (evidencePolicy !== "disclose" && evidencePolicy !== "strict") throw new Error("--evidence-policy must be disclose or strict.");
   if (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 1 || maxOutputTokens > 16384) throw new Error("--max-output-tokens must be between 1 and 16384.");
   return { help: false as const, slug: positionals[1], provider: values.provider, model: values.model,
-    budgetUsd, asOf, ollamaUrl: values["ollama-url"], searxngUrl: values["searxng-url"],
+    budgetUsd, asOf, effort, evidencePolicy, ollamaUrl: values["ollama-url"], searxngUrl: values["searxng-url"],
     evalFile: values["eval-file"], evalCase: values["eval-case"], apiKey: values["api-key"],
-    sources: values.source ?? [], queries: values.query, replayRun: values["replay-run"], maxOutputTokens, out: values.out ?? "runs" };
+    sources: values.source ?? [], queries: values.query, replayRun: values["replay-run"], maxOutputTokens, out: values.out ?? "runs" } as const;
 }

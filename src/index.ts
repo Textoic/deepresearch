@@ -12,3 +12,8 @@ export type { ArenaEvidenceBrief, LabEvidence, EvidencePassage } from "./evidenc
 export { evaluateRun, loadEvaluationCases } from "./eval.ts";
 export type { CriterionResult, EvaluationCase, EvaluationCriterion, EvaluationKind, EvaluationResult } from "./eval.ts";
 export type * from "./types.ts";
+
+export { selectEvidence, canonicalSourceUrl } from "./evidence.ts";
+export type { EvidencePolicy, EvidenceSelection } from "./evidence.ts";
+export { PythSourceAdapter, PortWatchSourceAdapter, collectAdapterSources, extractSourceUrls } from "./source-adapters.ts";
+export type { SourceAdapter, SourceAdapterContext, SourceAdapterResult, AdapterDiagnostic } from "./source-adapters.ts";

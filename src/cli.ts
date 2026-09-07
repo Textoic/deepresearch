@@ -17,7 +17,7 @@ async function main() {
   const searchProvider = flags.searxngUrl ? new SearxngSearchProvider({ baseUrl: flags.searxngUrl }) : undefined;
   const client = new ResearchClient({ provider, searchProvider, store: new FileRunStore(flags.out) });
   console.error(`Researching with ${flags.model}; up to ${flags.maxOutputTokens} output tokens. Local generation may take several minutes.`);
-  const request = { slug: flags.slug, budgetUsd: flags.budgetUsd, asOf: flags.asOf, sources, queries: flags.queries, maxOutputTokens: flags.maxOutputTokens, requirements: evaluationCase?.mustCover.map((criterion) => criterion.assertion) };
+  const request = { slug: flags.slug, budgetUsd: flags.budgetUsd, asOf: flags.asOf, sources, queries: flags.queries, effort: flags.effort, evidencePolicy: flags.evidencePolicy, maxOutputTokens: flags.maxOutputTokens, requirements: evaluationCase?.mustCover.map((criterion) => criterion.assertion) };
   const run = flags.replayRun ? await client.rewriteRun(JSON.parse(await readFile(join(flags.replayRun, "run.json"), "utf8")) as ResearchRun, request) : await client.researchMarket(request);
   console.log(run.reportMarkdown);
   console.error(`\nrun=${run.id} stop_reason=${run.stopReason} spend=$${run.ledger.spentUsd.toFixed(6)} cap=$${run.ledger.hardCapUsd.toFixed(6)}`);

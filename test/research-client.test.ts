@@ -9,6 +9,38 @@ class FakeProvider implements InferenceProvider {
   async complete(_request: ChatRequest): Promise<ChatResult> { return { content: "# grounded report", model: this.model, provider: this.kind, costUsd: 0.01, usage: { inputTokens: 10, outputTokens: 10 } }; }
 }
 
+test("general topics use no market fetch or Arena instructions and disclose failed searches", async () => {
+  let calls = 0;
+  const client = new ResearchClient({ provider: new FakeProvider(), polymarket: new PolymarketClient(async () => { throw new Error("Market network prohibited"); }), searchProvider: { async search() { calls++; throw new Error("unavailable"); } } });
+  const run = await client.researchTopic({ topic: "Shipping disruptions", budgetUsd: 1, effort: "medium" });
+  assert.equal(run.event, undefined);
+  assert.equal(run.stopReason, "complete");
+  assert.equal(calls, 4);
+  assert.equal(run.retrieval?.searches.filter(s => s.status === "failed").length, 4);
+  assert.ok(run.limitations.some(s => s.startsWith("Search failed:")));
+  const prompt = JSON.stringify(run.promptMessages);
+  assert.doesNotMatch(prompt, /requested lab|leaderboard|Elo|Polymarket/);
+  assert.match(prompt, /Shipping disruptions/);
+});
+
+test("missing rules skip both search and source adapters", async () => {
+  const forbidden = async () => { throw new Error("Must not retrieve"); };
+  const run = await new ResearchClient({ provider: new FakeProvider(), polymarket: market(""), searchProvider: { search: forbidden } }).researchMarket({ slug: "market", budgetUsd: 1 });
+  assert.equal(run.retrieval?.searches.length, 0);
+  assert.equal(run.stopReason, "missing_resolution_rules");
+});
+
+test("source adapters coexist with broad search and are not called on replay", async () => {
+  let calls = 0;
+  const client = new ResearchClient({ provider: new FakeProvider(), polymarket: market("https://example.test/official"), searchProvider: { async search() { return []; } }, sourceAdapters: [{ id: "fixture", domains: ["example.test"], async fetch() { calls++; return { documents: [{ url: "https://example.test/data", text: "official observation", retrievedAt: "2026-01-01", publishedAt: "2026-01-01", retrievalKind: "page" }], limitations: [] }; } }] });
+  const first = await client.researchMarket({ slug: "market", budgetUsd: 1 });
+  assert.equal(first.sources.length, 1);
+  assert.equal(first.retrieval?.searches.length, 2);
+  const replay = await client.rewriteRun(first, { slug: "market", budgetUsd: 1 });
+  assert.equal(calls, 1);
+  assert.deepEqual(replay.sources, first.sources);
+});
+
 test("blank and truncated outputs preserve token costs but cannot complete", async () => {
   for (const [content, finishReason, expected] of [["", "length", "empty_response"], ["partial", "length", "output_truncated"]]) {
     const provider = new FakeProvider();
