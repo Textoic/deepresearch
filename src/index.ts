@@ -1,0 +1,14 @@
+export { BudgetExceededError, BudgetGuard } from "./budget.ts";
+export { PolymarketClient } from "./polymarket.ts";
+export { OllamaProvider } from "./providers/ollama.ts";
+export { OpenRouterProvider } from "./providers/openrouter.ts";
+export { ResearchClient } from "./research-client.ts";
+export { SearxngSearchProvider } from "./search/searxng.ts";
+export { FileRunStore } from "./storage/file-store.ts";
+export { extractArenaSnapshot, renderArenaSnapshot, compareBoardDate } from "./arena.ts";
+export type { ArenaSnapshot, ArenaRow } from "./arena.ts";
+export { buildArenaEvidenceBrief } from "./evidence-brief.ts";
+export type { ArenaEvidenceBrief, LabEvidence, EvidencePassage } from "./evidence-brief.ts";
+export { evaluateRun, loadEvaluationCases } from "./eval.ts";
+export type { CriterionResult, EvaluationCase, EvaluationCriterion, EvaluationKind, EvaluationResult } from "./eval.ts";
+export type * from "./types.ts";

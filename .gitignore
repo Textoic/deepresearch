@@ -1,0 +1,6 @@
+.env
+runs/
+node_modules/
+dist/
+.pnpm-store/
+reviews/*

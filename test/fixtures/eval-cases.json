@@ -1,0 +1,25 @@
+[
+  {
+    "id": "market-resolution-v1",
+    "kind": "temporal_live",
+    "topic": "Example market",
+    "asOf": "2026-09-06T00:00:00Z",
+    "budgetUsd": 1,
+    "mustCover": [
+      {
+        "id": "resolution",
+        "assertion": "States the resolution authority.",
+        "weight": 10,
+        "requiredPhrases": ["resolution rules"],
+        "minSourceTier": 2
+      },
+      {
+        "id": "countercase",
+        "assertion": "Explains uncertainty.",
+        "weight": 5,
+        "requiredPhrases": ["unknowns"]
+      }
+    ],
+    "forbiddenPhrases": ["post-cutoff secret"]
+  }
+]

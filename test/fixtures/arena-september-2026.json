@@ -1,0 +1,61 @@
+[
+  {
+    "id": "pm-arena-text-overall-sept-2026-v1",
+    "kind": "temporal_live",
+    "topic": "Which company owns the first-ranked Arena Text Arena Overall model on 2026-09-30 at 12:00 PM ET?",
+    "asOf": "2026-09-06T00:00:00Z",
+    "budgetUsd": 1.5,
+    "mustCover": [
+      {
+        "id": "resolution-contract",
+        "assertion": "States the exact Arena Text Arena Overall, models-filtered, style-control-off resolution source, check time, and tie procedure.",
+        "weight": 12,
+        "requiredPhrases": ["text arena", "overall", "style control", "september 30", "12:00 pm et"],
+        "minSourceTier": 1
+      },
+      {
+        "id": "arena-method",
+        "assertion": "Explains that anonymous human battle votes feed a Bradley-Terry ranking and distinguishes it from a static benchmark.",
+        "weight": 10,
+        "requiredPhrases": ["bradley-terry", "anonymous", "votes"],
+        "minSourceTier": 1
+      },
+      {
+        "id": "leaderboard-snapshot",
+        "assertion": "Includes a dated top-20 table with rank, model, provider, score, confidence/rank spread, and vote count.",
+        "weight": 12,
+        "requiredPhrases": ["top 20", "rank", "score", "votes", "anthropic"],
+        "minSourceTier": 1
+      },
+      {
+        "id": "entry-lag",
+        "assertion": "Separates public release, Arena battle availability, public-name eligibility, vote accumulation, and rank stability; measures or explicitly says that a lag is unverified.",
+        "weight": 12,
+        "requiredPhrases": ["release", "arena", "votes", "lag"],
+        "minSourceTier": 1
+      },
+      {
+        "id": "candidate-gates",
+        "assertion": "Assesses each relevant top lab on three gates: plausible launch before cutoff, Arena eligibility in time, and credible first-place performance.",
+        "weight": 12,
+        "requiredPhrases": ["anthropic", "openai", "google", "grok", "release"],
+        "minSourceTier": 1
+      },
+      {
+        "id": "new-model-threshold",
+        "assertion": "Relates the leader's score, uncertainty, vote count, and challenger evidence to the required performance leap; it must not equate a model announcement with a leaderboard win.",
+        "weight": 10,
+        "requiredPhrases": ["1514", "confidence", "votes", "not sufficient"],
+        "minSourceTier": 1
+      },
+      {
+        "id": "astra-verification",
+        "assertion": "Verifies the claimed Astra model's release and its target-leaderboard status from primary sources, or labels either fact as unverified.",
+        "weight": 8,
+        "requiredPhrases": ["astra", "verified"],
+        "minSourceTier": 1
+      }
+    ],
+    "forbiddenPhrases": ["a release alone guarantees", "ranking is a static benchmark"]
+  }
+]

@@ -1,0 +1,14 @@
+use_default_settings: true
+
+general:
+  instance_name: "Budget Research local search"
+
+server:
+  bind_address: "0.0.0.0"
+  limiter: false
+  public_instance: false
+
+search:
+  formats:
+    - html
+    - json
