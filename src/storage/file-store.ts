@@ -2,7 +2,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ResearchRun, RunStore } from "../types.ts";
 
-/** Portable artifact store. Each run is self-contained and easy to archive or diff. */
 export class FileRunStore implements RunStore {
   private readonly rootDirectory: string;
   constructor(rootDirectory = "runs") { this.rootDirectory = rootDirectory; }

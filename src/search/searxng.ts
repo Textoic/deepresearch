@@ -3,11 +3,54 @@ import type { SearchProvider, SourceDocument } from "../types.ts";
 interface SearxngResult { url?: string; title?: string; content?: string; publishedDate?: string; }
 interface SearxngResponse { results?: SearxngResult[]; }
 
-/**
- * A no-vendor-lock-in retrieval adapter for a self-hosted SearXNG instance.
- * Its instance must enable the JSON output format. By default this returns
- * search snippets; set fetchPages to retain a bounded plain-text page snapshot.
- */
+const SEARCH_TIMEOUT_MS = 30000;
+const PAGE_TIMEOUT_MS = 20000;
+const MAX_RAW_CHARACTERS = 1_000_000;
+const MAX_PLAIN_CHARACTERS = 200_000;
+const SHORT_PAGE_CHARACTERS = 120;
+const CHALLENGE = /prove your humanity|verify you are human|access denied|enable javascript and cookies/i;
+const SHORT_PAGE_HOSTS = /(?:facebook|reddit)\.com/i;
+const PUBLISHED_META = /<meta[^>]+(?:property|name)=["'](?:article:published_time|datePublished|pubdate)["'][^>]+content=["']([^"']+)/i;
+
+function deadline(signal: AbortSignal | undefined, milliseconds: number): AbortSignal {
+  const timeout = AbortSignal.timeout(milliseconds);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+function validWebUrl(value: unknown): value is string {
+  try {
+    const url = new URL(String(value));
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch { return false; }
+}
+
+function stripHtml(html: string): string {
+  return html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function isBlocked(text: string, url: string): boolean {
+  if (!text.trim()) return true;
+  if (text.length < SHORT_PAGE_CHARACTERS && SHORT_PAGE_HOSTS.test(url)) return true;
+  return CHALLENGE.test(text.slice(0, 1500));
+}
+
+function publishedAtOf(raw: string, result: SearxngResult): string | undefined {
+  if (result.publishedDate) return result.publishedDate;
+  const declared = PUBLISHED_META.exec(raw)?.[1];
+  return declared && Number.isFinite(Date.parse(declared)) ? new Date(declared).toISOString() : undefined;
+}
+
+function snippetSource(result: SearxngResult, retrievedAt: string, retrievalError?: string): SourceDocument {
+  return { url: result.url!, title: result.title, text: result.content ?? "", publishedAt: result.publishedDate, retrievedAt, sourceTier: 2, retrievalKind: "snippet", ...(retrievalError ? { retrievalError } : {}) };
+}
+
+async function readPageText(response: Response): Promise<{ raw: string; text: string }> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.startsWith("text/")) throw new Error(`Unsupported page type: ${contentType}`);
+  const raw = (await response.text()).slice(0, MAX_RAW_CHARACTERS);
+  return { raw, text: contentType.includes("text/html") ? stripHtml(raw) : raw.slice(0, MAX_PLAIN_CHARACTERS) };
+}
+
 export class SearxngSearchProvider implements SearchProvider {
   private readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
@@ -20,8 +63,9 @@ export class SearxngSearchProvider implements SearchProvider {
 
   async search(query: string, options: { limit: number; signal?: AbortSignal }): Promise<SourceDocument[]> {
     const endpoint = new URL("/search", this.baseUrl);
-    endpoint.searchParams.set("q", query); endpoint.searchParams.set("format", "json");
-    const response = await this.fetchFn(endpoint, { headers: { accept: "application/json" }, signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000) });
+    endpoint.searchParams.set("q", query);
+    endpoint.searchParams.set("format", "json");
+    const response = await this.fetchFn(endpoint, { headers: { accept: "application/json" }, signal: deadline(options.signal, SEARCH_TIMEOUT_MS) });
     if (!response.ok) throw new Error(`SearXNG returned ${response.status}. Ensure its JSON format is enabled.`);
     const payload = await response.json() as SearxngResponse;
     const results = (payload.results ?? []).slice(0, options.limit).filter((result) => validWebUrl(result.url));
@@ -30,24 +74,19 @@ export class SearxngSearchProvider implements SearchProvider {
 
   private async toSource(result: SearxngResult, signal?: AbortSignal): Promise<SourceDocument> {
     const retrievedAt = new Date().toISOString();
-    if (!this.fetchPages) return { url: result.url!, title: result.title, text: result.content ?? "", publishedAt: result.publishedDate, retrievedAt, sourceTier: 2, retrievalKind: "snippet" };
+    if (!this.fetchPages) return snippetSource(result, retrievedAt);
     try {
-      const response = await this.fetchFn(result.url!, { headers: { accept: "text/html,text/plain" }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000) });
-      if (!response.ok) throw new Error(String(response.status));
-      const contentType = response.headers.get("content-type") ?? "";
-      if (!contentType.startsWith("text/")) throw new Error(`Unsupported page type: ${contentType}`);
-      const raw = (await response.text()).slice(0, 1_000_000);
-      const text = contentType.includes("text/html") ? stripHtml(raw) : raw.slice(0, 200_000);
-      if (!text.trim() || (text.length < 120 && /(?:facebook|reddit)\.com/i.test(result.url!)) || /prove your humanity|verify you are human|access denied|enable javascript and cookies/i.test(text.slice(0, 1500))) throw new Error("Blocked or empty page; preserving discovery snippet only");
-      const date = raw.match(/<meta[^>]+(?:property|name)=["'](?:article:published_time|datePublished|pubdate)["'][^>]+content=["']([^"']+)/i)?.[1];
-      const publishedAt = result.publishedDate ?? (date && Number.isFinite(Date.parse(date)) ? new Date(date).toISOString() : undefined);
-      return { url: result.url!, title: result.title, text: text || result.content || "", publishedAt, retrievedAt, sourceTier: 2, retrievalKind: "page" };
+      return await this.fetchPage(result, retrievedAt, signal);
     } catch (error) {
-      // Search snippets are still useful discovery evidence; the report must label the limitation.
-      return { url: result.url!, title: result.title, text: result.content ?? "", publishedAt: result.publishedDate, retrievedAt, sourceTier: 2, retrievalKind: "snippet", retrievalError: String(error) };
+      return snippetSource(result, retrievedAt, String(error));
     }
   }
-}
 
-function validWebUrl(value: unknown): value is string { try { const url = new URL(String(value)); return url.protocol === "https:" || url.protocol === "http:"; } catch { return false; } }
-function stripHtml(html: string): string { return html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(); }
+  private async fetchPage(result: SearxngResult, retrievedAt: string, signal?: AbortSignal): Promise<SourceDocument> {
+    const response = await this.fetchFn(result.url!, { headers: { accept: "text/html,text/plain" }, signal: deadline(signal, PAGE_TIMEOUT_MS) });
+    if (!response.ok) throw new Error(String(response.status));
+    const { raw, text } = await readPageText(response);
+    if (isBlocked(text, result.url!)) throw new Error("Blocked or empty page; preserving discovery snippet only");
+    return { url: result.url!, title: result.title, text: text || result.content || "", publishedAt: publishedAtOf(raw, result), retrievedAt, sourceTier: 2, retrievalKind: "page" };
+  }
+}

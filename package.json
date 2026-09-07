@@ -15,9 +15,10 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && tsx --test test/*.test.ts",
+    "test": "node tools/lint.mjs && tsc -p tsconfig.json && tsx --test test/*.test.ts",
     "check": "tsc -p tsconfig.json --noEmit",
-    "start": "tsc -p tsconfig.json && node dist/cli.js"
+    "start": "tsc -p tsconfig.json && node dist/cli.js",
+    "lint": "node tools/lint.mjs"
   },
   "engines": {
     "node": ">=22.0.0"

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PolymarketClient, ResearchClient } from "../src/index.ts";
 import { evidenceForWriter, normalizeMarketEvent } from "../src/market-policy.ts";
-import { initialUnits } from "../src/market-decomposition.ts";
+import { initialUnits } from "../src/market-units.ts";
 import type { ChatRequest, InferenceProvider, PolymarketEvent } from "../src/types.ts";
 
 const event: PolymarketEvent = { id: "e", slug: "next-person", title: "Who will Trump pick as the next Press Secretary?", negRisk: true,

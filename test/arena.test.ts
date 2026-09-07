@@ -55,7 +55,6 @@ test("date-only comparisons distinguish before, after, same day, missing and inv
   assert.equal(parseEnglishDate("Sep 02, 2026"), "2026-09-02");
 });
 
-// Synthetic launch example: the behavior must not depend on memorizing the live market's answer.
 const launch: SourceDocument = { url: "https://openai.com/index/nova", retrievalKind: "page", retrievedAt: "2026-09-06T00:00:00Z", text: "Navigation ".repeat(500) + "Published September 3, 2026 " + "Contents ".repeat(500) + "Today, we are releasing GPT-Nova. Access is limited initially. This is not evidence of Arena performance." };
 
 test("per-lab packet preserves verbatim launch and date evidence beyond navigation and flags stale board", () => {

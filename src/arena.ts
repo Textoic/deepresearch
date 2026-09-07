@@ -10,7 +10,6 @@ export interface ArenaRow {
   scoreUncertainty: number;
   votes: number;
   preliminary: boolean;
-  /** Exact normalized row text, retained for auditing extraction. */
   evidence: string;
 }
 
@@ -45,38 +44,72 @@ export function parseEnglishDate(value: string): string | undefined {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === iso ? iso : undefined;
 }
 
-const providers = ["Thinking Machines", "Anthropic", "Google", "Meta", "Alibaba", "Moonshot", "OpenAI", "SpaceXAI", "xAI", "Z.ai", "Baidu", "Xiaomi", "DeepSeek", "Bytedance", "ByteDance", "Amazon", "Nvidia", "Tencent", "Thinky", "MiniMax", "Mistral", "Meituan", "StepFun", "Microsoft", "01.AI", "Cohere", "AI21 Labs", "Reka", "Allen AI", "Nexusflow", "Nous Research", "Snowflake", "Databricks"];
+const PROVIDERS = ["Thinking Machines", "Anthropic", "Google", "Meta", "Alibaba", "Moonshot", "OpenAI", "SpaceXAI", "xAI", "Z.ai", "Baidu", "Xiaomi", "DeepSeek", "Bytedance", "ByteDance", "Amazon", "Nvidia", "Tencent", "Thinky", "MiniMax", "Mistral", "Meituan", "StepFun", "Microsoft", "01.AI", "Cohere", "AI21 Labs", "Reka", "Allen AI", "Nexusflow", "Nous Research", "Snowflake", "Databricks"];
 
-/** Adapter for Arena's flattened text table. Unknown layouts fail closed, never guess columns. */
+const TABLE_HEADER = "Rank Rank Spread Model Score Votes Price $/M Context";
+const ROW_BOUNDARY = /(?:^|\s)(\d{1,4}) (\d{1,4}) (\d{1,4}) (?=[A-Za-z])/g;
+const ROW = /^(\d+) (\d+) (\d+) (.+?) · (.+?) (\d{3,4}(?:\.\d+)?) ±\s*(\d+(?:\.\d+)?) (Preliminary )?((?:\d{1,3}(?:,\d{3})+|\d+)) (?:(?:\$[\d,.]+ \/ \$[\d,.]+)|N\/A) (?:[\d.]+[KM]|N\/A)(?:\s|$)/;
+const MINIMUM_ROWS = 20;
+
+function normalizeArenaText(raw: string): string {
+  return raw.replace(/&nbsp;|&#160;/g, " ").replace(/&plusmn;|&#177;/g, "±").replace(/&middot;|&#183;/g, "·").replace(/\s+/g, " ").trim();
+}
+
+function readBoardMetadata(prefix: string): { dataDate?: string; declaredModels?: number } {
+  const dateMatches = [...prefix.matchAll(new RegExp(ENGLISH_DATE.source, "gi"))];
+  return {
+    dataDate: dateMatches.length ? parseEnglishDate(dateMatches.at(-1)![0]) : undefined,
+    declaredModels: Number(/([\d,]+) models\b/.exec(prefix)?.[1]?.replace(/,/g, "")) || undefined,
+  };
+}
+
+function splitIdentity(identity: string): { model: string; provider: string } | undefined {
+  const provider = PROVIDERS.find((candidate) => identity.endsWith(` ${candidate}`));
+  if (!provider) return undefined;
+  const named = identity.slice(0, -(provider.length + 1));
+  const model = named.startsWith(`${provider} `) ? named.slice(provider.length + 1) : named;
+  return { model, provider };
+}
+
+function isConsistentRow(row: ArenaRow, expectedRank: number): boolean {
+  if (!row.model) return false;
+  if (row.rank !== expectedRank) return false;
+  if (row.rankLow > row.rank || row.rankHigh < row.rank) return false;
+  return row.votes >= 1;
+}
+
+function parseRow(rowText: string, expectedRank: number): ArenaRow | undefined {
+  const match = ROW.exec(rowText);
+  if (!match) return undefined;
+  const identity = splitIdentity(match[4]!);
+  if (!identity) return undefined;
+  const row: ArenaRow = { rank: Number(match[1]), rankLow: Number(match[2]), rankHigh: Number(match[3]), model: identity.model, provider: identity.provider, score: Number(match[6]), scoreUncertainty: Number(match[7]), preliminary: Boolean(match[8]), votes: Number(match[9]!.replace(/,/g, "")), evidence: match[0].trim() };
+  return isConsistentRow(row, expectedRank) ? row : undefined;
+}
+
+function parseRows(table: string): ArenaRow[] {
+  const boundaries = [...table.matchAll(ROW_BOUNDARY)];
+  const rows: ArenaRow[] = [];
+  for (let index = 0; index < boundaries.length; index++) {
+    const rowText = table.slice(boundaries[index]!.index, boundaries[index + 1]?.index ?? table.length).trim();
+    const row = parseRow(rowText, rows.length + 1);
+    if (!row) break;
+    rows.push(row);
+  }
+  return rows;
+}
+
 export function extractArenaSnapshot(source: SourceDocument, sourceNumber = 1): ArenaSnapshot {
   const snapshot: ArenaSnapshot = { status: "invalid", sourceUrl: source.url, sourceNumber, retrievedAt: source.retrievedAt, completeBoard: false, rows: [], issues: [] };
   const fail = (message: string) => { snapshot.issues.push(message); return snapshot; };
   if (!isArenaTarget(source.url) || source.retrievalKind !== "page") return fail("Target leaderboard must be a fetched page, not a snippet or different category.");
-  const text = source.text.replace(/&nbsp;|&#160;/g, " ").replace(/&plusmn;|&#177;/g, "±").replace(/&middot;|&#183;/g, "·").replace(/\s+/g, " ").trim();
-  const header = "Rank Rank Spread Model Score Votes Price $/M Context";
-  const start = text.indexOf(header);
+  const text = normalizeArenaText(source.text);
+  const start = text.indexOf(TABLE_HEADER);
   if (start < 0) return fail("Unrecognized Arena table header; structured table withheld.");
-  const prefix = text.slice(0, start);
-  const dateMatches = [...prefix.matchAll(new RegExp(ENGLISH_DATE.source, "gi"))];
-  snapshot.dataDate = dateMatches.length ? parseEnglishDate(dateMatches.at(-1)![0]) : undefined;
-  snapshot.declaredModels = Number(/([\d,]+) models\b/.exec(prefix)?.[1]?.replace(/,/g, "")) || undefined;
+  Object.assign(snapshot, readBoardMetadata(text.slice(0, start)));
   if (!snapshot.dataDate) return fail("Leaderboard data date unavailable or invalid; retrieval date cannot substitute for it.");
-  const table = text.slice(start + header.length).trim();
-  const boundaries = [...table.matchAll(/(?:^|\s)(\d{1,4}) (\d{1,4}) (\d{1,4}) (?=[A-Za-z])/g)];
-  for (let i = 0; i < boundaries.length; i++) {
-    const boundary = boundaries[i]!;
-    const rowText = table.slice(boundary.index, boundaries[i + 1]?.index ?? table.length).trim();
-    const match = /^(\d+) (\d+) (\d+) (.+?) · (.+?) (\d{3,4}(?:\.\d+)?) ±\s*(\d+(?:\.\d+)?) (Preliminary )?((?:\d{1,3}(?:,\d{3})+|\d+)) (?:(?:\$[\d,.]+ \/ \$[\d,.]+)|N\/A) (?:[\d.]+[KM]|N\/A)(?:\s|$)/.exec(rowText);
-    const identity = match?.[4];
-    const provider = identity && providers.find(p => identity.endsWith(` ${p}`));
-    if (!match || !provider) break; // Never skip an ambiguous row and then claim a contiguous top 20.
-    let model = identity!.slice(0, -(provider.length + 1));
-    if (model.startsWith(`${provider} `)) model = model.slice(provider.length + 1);
-    const row: ArenaRow = { rank: Number(match[1]), rankLow: Number(match[2]), rankHigh: Number(match[3]), model, provider, score: Number(match[6]), scoreUncertainty: Number(match[7]), preliminary: !!match[8], votes: Number(match[9]!.replace(/,/g, "")), evidence: match[0].trim() };
-    if (!model || row.rank !== snapshot.rows.length + 1 || row.rankLow > row.rank || row.rankHigh < row.rank || row.votes < 1) break;
-    snapshot.rows.push(row);
-  }
-  if (snapshot.rows.length < 20) {
+  snapshot.rows = parseRows(text.slice(start + TABLE_HEADER.length).trim());
+  if (snapshot.rows.length < MINIMUM_ROWS) {
     snapshot.rows = [];
     return fail("Could not validate 20 contiguous rows with separate rank range, score uncertainty, votes and provider. No partial table published.");
   }
@@ -86,7 +119,6 @@ export function extractArenaSnapshot(source: SourceDocument, sourceNumber = 1): 
   return snapshot;
 }
 
-/** Date-only evidence cannot establish intraday ordering. */
 export function compareBoardDate(boardDate: string | undefined, eventDate: string | undefined): "before" | "same_day" | "after" | "unknown" {
   const valid = (value?: string) => !!value && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
   if (!valid(boardDate) || !valid(eventDate)) return "unknown";
@@ -96,6 +128,6 @@ export function compareBoardDate(boardDate: string | undefined, eventDate: strin
 export function renderArenaSnapshot(snapshot: ArenaSnapshot): string {
   if (snapshot.status !== "valid") return `## Leaderboard extraction unavailable\n\n${snapshot.issues.join(" ")}\n`;
   const safe = (value: string) => value.replace(/[|\r\n]/g, " ");
-  const rows = snapshot.rows.slice(0, 20).map(r => `| ${r.rank} | ${safe(r.model)} | ${safe(r.provider)} | ${r.score} | ±${r.scoreUncertainty} | ${r.rankLow}–${r.rankHigh} | ${r.votes.toLocaleString("en-US")} | ${r.preliminary ? "Preliminary" : "Not marked"} |`);
+  const rows = snapshot.rows.slice(0, MINIMUM_ROWS).map(r => `| ${r.rank} | ${safe(r.model)} | ${safe(r.provider)} | ${r.score} | ±${r.scoreUncertainty} | ${r.rankLow}–${r.rankHigh} | ${r.votes.toLocaleString("en-US")} | ${r.preliminary ? "Preliminary" : "Not marked"} |`);
   return `## Verified extraction: top 20 leaderboard rows\n\nBoard data date: **${snapshot.dataDate}**. Retrieved: ${snapshot.retrievedAt}. [Source ${snapshot.sourceNumber}](${snapshot.sourceUrl}). This is a dated snapshot, not a claim of current live freshness.\n\n| Rank | Model | Provider | Score | Score uncertainty | Rank range | Votes | Explicit marker |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n${rows.join("\n")}\n\n“Not marked” means no Preliminary marker in the parsed row; it does not certify stability or eligibility. Score uncertainty and rank range are different fields. ${snapshot.issues.join(" ")}\n`;
 }

@@ -16,7 +16,6 @@ export function normalizeMarketEvent(event: PolymarketEvent): PolymarketEvent {
 }
 
 export function marketContext(event: PolymarketEvent) {
-  // Raw prices and excluded markets remain only in the audit snapshot, never writer metadata.
   return { title: event.title, description: event.description, resolutionSource: event.resolutionSource, endDate: event.endDate,
     markets: event.markets?.filter(eligibleMarket).map(m => ({ question: m.question, description: m.description, endDate: m.endDate, outcomes: m.outcomes })) };
 }
@@ -25,22 +24,54 @@ export function candidateName(m: PolymarketMarket): string {
   return m.groupItemTitle?.trim() || m.question?.match(/^Will (.+?) (?:be|become) (?:the )?next /i)?.[1]?.trim() || "";
 }
 
-/** Conservative sentence filtering complements the semantic prompt policy; it is not a semantic guarantee. */
+const MARKET_SITE = /(?:^|\.)(?:polymarket\.com|polymarket\.us|kalshi\.com|polymarketanalytics\.com|polyrama\.io)$/;
+const FROZEN_DEPENDENCY_QUOTE = /^https:\/\/gamma-api\.polymarket\.com\/events\?slug=/;
+const SENTENCE_BOUNDARY = /(?<=[.!?])\s+|\n+/;
+const FORECAST = /\b(?:odds|probabilit\w*|chance\w*|predict\w*|forecast\w*|favorite\w*|favourite\w*|betting|priced?|percent)\b|\d\s*%/i;
+const ODDS_WORDS = /\b(?:odds|probabilit\w*|chance\w*|favorite\w*|favourite\w*|betting|priced?)\b|\d\s*%/i;
+const AGI_ODDS_WORDS = /\b(?:odds|probabilit\w*|chance\w*|betting|priced?)\b|\d\s*%/i;
+const SENATE_CONTROL = /(?:control (?:of )?(?:the )?senate|senate (?:control|majority)|win (?:the )?senate|chamber|balance of power)/i;
+
+const WITHHELD_MARKET_TEXT = "[Market UI withheld to avoid target-odds leakage from navigation and related markets. Use identity-checked structured underlying quotes when supplied, and frozen target resolution rules.]";
+const WITHHELD_FORECAST_TEXT = "[Target forecast content withheld; use resolution metadata.]";
+
+interface TargetLeakRule {
+  appliesTo(title: string): boolean;
+  leaks(sentence: string, source: SourceDocument): boolean;
+}
+
+const TARGET_LEAK_RULES: TargetLeakRule[] = [
+  {
+    appliesTo: (title) => /senate/i.test(title) && /(?:control|majority|win the senate)/i.test(title),
+    leaks: (sentence, source) => SENATE_CONTROL.test(`${sentence} ${source.title ?? ""}`),
+  },
+  {
+    appliesTo: (title) => /press secretary/i.test(title),
+    leaks: (sentence) => ODDS_WORDS.test(sentence),
+  },
+  {
+    appliesTo: (title) => /\bAGI\b/i.test(title),
+    leaks: (sentence) => /\bAGI\b|artificial general intelligence/i.test(sentence) && AGI_ODDS_WORDS.test(sentence),
+  },
+];
+
+function leaksTargetForecast(sentence: string, source: SourceDocument, event: PolymarketEvent): boolean {
+  if (!FORECAST.test(sentence)) return false;
+  return TARGET_LEAK_RULES.some((rule) => rule.appliesTo(event.title) && rule.leaks(sentence, source));
+}
+
+function isFrozenDependencyQuote(source: SourceDocument, event: PolymarketEvent): boolean {
+  return source.dependencyOf === event.slug && FROZEN_DEPENDENCY_QUOTE.test(source.url);
+}
+
+function isTargetMarketUrl(url: string, slug: string): boolean {
+  return url.includes(`/event/${slug}`) || url.includes(`/markets/${slug}`);
+}
+
 export function evidenceForWriter(source: SourceDocument, event: PolymarketEvent): SourceDocument {
-  if (source.dependencyOf === event.slug && /^https:\/\/gamma-api\.polymarket\.com\/events\?slug=/.test(source.url)) return source;
-  const marketSite = /(?:^|\.)(?:polymarket\.com|polymarket\.us|kalshi\.com|polymarketanalytics\.com|polyrama\.io)$/.test(new URL(source.url).hostname);
-  if (marketSite) return { ...source, title: "Prediction-market page withheld", text: "[Market UI withheld to avoid target-odds leakage from navigation and related markets. Use identity-checked structured underlying quotes when supplied, and frozen target resolution rules.]" };
-  const targetUrl = source.url.includes(`/event/${event.slug}`) || source.url.includes(`/markets/${event.slug}`);
-  const sentences = source.text.split(/(?<=[.!?])\s+|\n+/);
-  const text = sentences.filter(sentence => {
-    if (targetUrl) return false; // Rules are supplied from the frozen, price-free metadata.
-    const forecast = /\b(?:odds|probabilit\w*|chance\w*|predict\w*|forecast\w*|favorite\w*|favourite\w*|betting|priced?|percent)\b|\d\s*%/i.test(sentence);
-    if (!forecast) return true;
-    const senateTarget = /senate/i.test(event.title) && /(?:control|majority|win the senate)/i.test(event.title);
-    if (senateTarget && /(?:control (?:of )?(?:the )?senate|senate (?:control|majority)|win (?:the )?senate|chamber|balance of power)/i.test(sentence + " " + (source.title ?? ""))) return false;
-    if (/press secretary/i.test(event.title) && /(?:odds|probabilit\w*|chance\w*|favorite\w*|favourite\w*|betting|priced?)\b|\d\s*%/i.test(sentence)) return false;
-    if (/\bAGI\b/i.test(event.title) && /\bAGI\b|artificial general intelligence/i.test(sentence) && /\b(?:odds|probabilit\w*|chance\w*|betting|priced?)\b|\d\s*%/i.test(sentence)) return false;
-    return true;
-  }).join("\n");
-  return { ...source, title: targetUrl ? "Target market: pricing withheld" : source.title, text: text || "[Target forecast content withheld; use resolution metadata.]" };
+  if (isFrozenDependencyQuote(source, event)) return source;
+  if (MARKET_SITE.test(new URL(source.url).hostname)) return { ...source, title: "Prediction-market page withheld", text: WITHHELD_MARKET_TEXT };
+  if (isTargetMarketUrl(source.url, event.slug)) return { ...source, title: "Target market: pricing withheld", text: WITHHELD_FORECAST_TEXT };
+  const text = source.text.split(SENTENCE_BOUNDARY).filter((sentence) => !leaksTargetForecast(sentence, source, event)).join("\n");
+  return { ...source, text: text || WITHHELD_FORECAST_TEXT };
 }

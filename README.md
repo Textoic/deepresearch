@@ -237,11 +237,24 @@ const run = await client.researchMarket({ slug: "market-slug", budgetUsd: 1, asO
 console.log(run.reportMarkdown, run.ledger.spentUsd);
 ```
 
+## Code standards
+
+`AGENTS.md` holds the rules every contributor and AI agent follows: no comments in code,
+and per-function limits on cyclomatic complexity (8), length (40 lines), nesting (3),
+parameters (4), and file length (220 lines). Rationale, trade-offs, and findings go in
+`architecture.md`, the only prose-about-code file in the repository.
+
+`tools/lint.mjs` enforces all of that deterministically with the TypeScript compiler API
+and no extra dependencies. It runs as part of `pnpm test`, standalone via `pnpm lint`, and
+automatically after every agent file edit through the `PostToolUse` hook in
+`.claude/settings.json` (`tools/lint-hook.mjs`).
+
 ## Test and package checks
 
 ```powershell
 pnpm test
 pnpm check
+pnpm lint
 ```
 
 `loadEvaluationCases()` accepts a reviewed JSON array of test cases. Each case contains weighted atomic criteria, transparent required phrases for the no-cost baseline, a budget, cutoff, and optional forbidden phrases. `evaluateRun()` returns criterion-level coverage, citation signal, budget compliance, and an aggregate score. Keep richer semantic/citation-entailment judging as a sampled, explicitly budgeted second layer.

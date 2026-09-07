@@ -7,7 +7,6 @@ export class BudgetExceededError extends Error {
   }
 }
 
-/** Enforces a hard provider-cost cap outside model prompts. */
 export class BudgetGuard {
   readonly ledger: RunLedger;
 
@@ -31,7 +30,6 @@ export class BudgetGuard {
   settle(stage: string, reservedUsd: number, result: ChatResult, fallbackCostUsd: number): void {
     this.ledger.reservedUsd = Math.max(0, this.ledger.reservedUsd - reservedUsd);
     const actualUsd = result.costUsd ?? fallbackCostUsd;
-    // A provider may return an unexpected bill. Preserve the fact and make it visible.
     this.ledger.spentUsd += actualUsd;
     this.ledger.calls.push({
       stage,

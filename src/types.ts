@@ -34,7 +34,6 @@ export interface CostEstimate {
 export interface ChatResult {
   content: string;
   usage: TokenUsage;
-  /** Actual provider-reported cost when available. */
   costUsd?: number;
   model: string;
   provider: ProviderKind;
@@ -93,7 +92,6 @@ export interface SourceDocument {
   sourceTier?: 1 | 2 | 3 | 4;
   retrievalKind?: "page" | "snippet";
   retrievalError?: string;
-  /** Structured, identity-checked underlying market snapshot, never a target market. */
   dependencyOf?: string;
 }
 
@@ -130,7 +128,6 @@ export interface ResearchRun {
   event?: PolymarketEvent;
   sources: SourceDocument[];
   reportMarkdown: string;
-  /** Unmodified model output; reportMarkdown may also contain deterministic data tables. */
   narrativeMarkdown?: string;
   retrieval?: { searches: Array<{ query: string; status: "complete" | "failed"; documents: number }>; adapters: import("./source-adapters.ts").AdapterDiagnostic[]; excluded: import("./evidence.ts").EvidenceDecision[]; policy: import("./evidence.ts").EvidencePolicy };
   arenaEvidence?: { snapshot: ArenaSnapshot; brief: ArenaEvidenceBrief };
@@ -167,17 +164,13 @@ export interface ResearchDossier {
 export interface ResearchMarketRequest {
   slug: string;
   asOf?: Date;
-  /** Hard maximum for paid inference. Local providers still record usage at $0. */
   budgetUsd: number;
-  /** Caller-provided or search-adapter-provided evidence. */
   sources?: SourceDocument[];
-  /** Human-reviewed analysis requirements, normally derived from an evaluation case. */
   requirements?: string[];
   maxOutputTokens?: number;
   thinking?: boolean;
   queries?: string[];
   evidencePolicy?: import("./evidence.ts").EvidencePolicy;
-  /** Bounded query coverage; does not increase the inference budget. */
   effort?: "low" | "medium" | "high";
 }
 

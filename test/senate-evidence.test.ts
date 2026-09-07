@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fetchRaceOdds, parseSenateRoster, renderSenateEvidence, renderSenateReport, type SenateRoster } from "../src/senate-evidence.ts";
+import { fetchRaceOdds, parseSenateRoster, type SenateRoster } from "../src/senate-evidence.ts";
+import { renderSenateEvidence, renderSenateReport } from "../src/senate-report.ts";
 import type { PolymarketEvent, ResearchUnit } from "../src/types.ts";
 
 const target: PolymarketEvent = { id: "1", slug: "senate-control", title: "Senate control 2026", raw: null };

@@ -3,12 +3,10 @@ import type { ResearchRun } from "./types.ts";
 
 export type EvaluationKind = "evergreen" | "temporal_live" | "resolved_temporal" | "adversarial";
 
-/** A human-reviewed, weighted atomic rubric. It intentionally does not prescribe a golden report. */
 export interface EvaluationCriterion {
   id: string;
   assertion: string;
   weight: number;
-  /** Transparent baseline matcher; semantic judges can be layered on top later. */
   requiredPhrases: string[];
   minSourceTier?: 1 | 2 | 3 | 4;
 }
@@ -57,7 +55,6 @@ export function evaluateRun(run: ResearchRun, testCase: EvaluationCase): Evaluat
   const forbiddenContentFound = (testCase.forbiddenPhrases ?? []).filter((phrase) => report.includes(phrase.toLocaleLowerCase()));
   const budgetCompliant = run.ledger.spentUsd <= testCase.budgetUsd + 1e-9;
   const citationSignal = /\[[^\]]+\]\(https?:\/\//.test(run.reportMarkdown) ? 1 : 0;
-  // A blank or interrupted generation cannot earn quality points for costing nothing.
   const score = run.stopReason !== "complete" || !report.trim() ? 0 : Math.max(0, coverage * 0.75 + citationSignal * 0.15 + (budgetCompliant ? 0.10 : 0) - forbiddenContentFound.length * 0.10);
   return { caseId: testCase.id, coverage, budgetCompliant, citationSignal, forbiddenContentFound, score, criteria };
 }
@@ -70,15 +67,21 @@ function scoreCriterion(report: string, run: ResearchRun, criterion: EvaluationC
   return { id: criterion.id, passed, score: passed ? 1 : 0, reason: missing.length ? `Missing required phrases: ${missing.join(", ")}` : tierOk ? "Covered" : `No evidence source at tier ${criterion.minSourceTier} or better` };
 }
 
+function isValidCriterion(criterion: EvaluationCriterion): boolean {
+  if (!criterion.id || !Array.isArray(criterion.requiredPhrases)) return false;
+  return Number.isFinite(criterion.weight) && criterion.weight > 0;
+}
+
+function hasRequiredCaseFields(testCase: Partial<EvaluationCase>): boolean {
+  if (!testCase.id || !testCase.topic || !testCase.asOf) return false;
+  return Number.isFinite(testCase.budgetUsd) && Array.isArray(testCase.mustCover);
+}
+
 function validateEvaluationCase(value: unknown): asserts value is EvaluationCase {
   if (!value || typeof value !== "object") throw new Error("Evaluation case must be an object.");
   const testCase = value as Partial<EvaluationCase>;
-  if (!testCase.id || !testCase.topic || !testCase.asOf || !Number.isFinite(testCase.budgetUsd) || !Array.isArray(testCase.mustCover)) {
-    throw new Error("Evaluation case requires id, topic, asOf, budgetUsd, and mustCover.");
-  }
-  for (const criterion of testCase.mustCover) {
-    if (!criterion.id || !Number.isFinite(criterion.weight) || criterion.weight <= 0 || !Array.isArray(criterion.requiredPhrases)) {
-      throw new Error(`Invalid criterion in evaluation case '${testCase.id}'.`);
-    }
+  if (!hasRequiredCaseFields(testCase)) throw new Error("Evaluation case requires id, topic, asOf, budgetUsd, and mustCover.");
+  for (const criterion of testCase.mustCover!) {
+    if (!isValidCriterion(criterion)) throw new Error(`Invalid criterion in evaluation case '${testCase.id}'.`);
   }
 }
