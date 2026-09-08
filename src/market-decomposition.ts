@@ -4,8 +4,9 @@ import { fetchRaceOdds, parseSenateRoster } from "./senate-evidence.ts";
 import { candidateName, eligibleMarket, evidenceForWriter } from "./market-policy.ts";
 import { candidateUnit, dependencyQueries, discoveryQueries, namedUnit, parseUnits } from "./market-units.ts";
 import { auditMessages, discoveryMessages, dossierMessages, renderSources, type Lead } from "./decomposition-prompts.ts";
-import { DecompositionSession, DISCOVERY_TOKENS, DOSSIER_TOKENS, type Decomposition, type DecompositionOptions } from "./decomposition-session.ts";
-import type { ChatMessage, PolymarketMarket, ResearchUnit } from "./types.ts";
+import { DecompositionSession, DISCOVERY_TOKENS, DOSSIER_TOKENS, TruncatedOutputError, type Decomposition, type DecompositionOptions } from "./decomposition-session.ts";
+import { OPERATIONAL_PREFIX } from "./run-assembly.ts";
+import type { ChatMessage, PolymarketMarket, ResearchDossier, ResearchUnit } from "./types.ts";
 
 export type { DecompositionOptions };
 
@@ -13,6 +14,7 @@ const NO_ROSTER = "No complete official Senate roster parsed; provide a captured
 const INCOMPLETE_UNITS = "Not every planned unit was researched; see unit roster and dossiers.";
 const EXCLUDED_QUOTE = "Structured quote excluded by evidence cutoff policy";
 const UNVERIFIED_HOLDER = "Current holder not verified from official roster.";
+const PARTIAL_COVERAGE_NOTE = "[Coverage of this subject stops here; the remaining retrieved evidence for it was not summarised.]";
 
 const MAX_UNLISTED = 5;
 const MAX_DEPENDENCIES = 6;
@@ -24,6 +26,8 @@ const CITED_SOURCE = /Source \d+/;
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+interface UnitContext { numbers: number[]; promptMessages: ChatMessage[]; }
 
 function sameName(market: PolymarketMarket, name: string): boolean {
   return candidateName(market).toLowerCase() === name.toLowerCase();
@@ -123,22 +127,35 @@ class MarketDecomposer extends DecompositionSession {
     return `\nSTRUCTURED RACE FACTS: ${holderFacts}\n${quotes}\n`;
   }
 
+  private recordDossier(unit: ResearchUnit, narrativeMarkdown: string, context: UnitContext, status: ResearchDossier["status"]): void {
+    this.result.dossiers.push({ unit, narrativeMarkdown, reportMarkdown: linkSourceReferences(narrativeMarkdown, this.sources), sourceNumbers: context.numbers, status, promptMessages: context.promptMessages });
+  }
+
+  private recordTruncation(unit: ResearchUnit, error: TruncatedOutputError, context: UnitContext): boolean {
+    this.result.limitations.push(`${OPERATIONAL_PREFIX}${unit.name}: dossier reached its length limit; the retained text is partial.`);
+    this.recordDossier(unit, `${error.partialContent.trimEnd()}\n\n${PARTIAL_COVERAGE_NOTE}`, context, "output_truncated");
+    return true;
+  }
+
+  private recordFailure(unit: ResearchUnit, error: unknown, context: UnitContext): boolean {
+    if (error instanceof TruncatedOutputError) return this.recordTruncation(unit, error, context);
+    const status = error instanceof BudgetExceededError ? "budget_exhausted" : "error";
+    const message = `${unit.name}: ${describe(error)}`;
+    this.result.limitations.push(message);
+    this.result.dossiers.push({ unit, reportMarkdown: `Research incomplete: ${message}`, sourceNumbers: context.numbers, status, promptMessages: context.promptMessages });
+    return status !== "budget_exhausted";
+  }
+
   private async researchUnit(unit: ResearchUnit): Promise<boolean> {
-    let promptMessages: ChatMessage[] = [];
-    let numbers: number[] = [];
+    const context: UnitContext = { numbers: [], promptMessages: [] };
     try {
-      numbers = [...new Set(this.accept(await this.search(unit.queries)))];
-      const structuredContext = unit.kind === "race" ? await this.raceContext(unit, numbers) : "";
-      promptMessages = dossierMessages({ asOf: this.asOf, event: this.event, unit, structuredContext, evidence: this.evidenceFor(numbers, unit.name) });
-      const narrativeMarkdown = await this.call(`dossier:${unit.name}`, promptMessages, DOSSIER_TOKENS);
-      this.result.dossiers.push({ unit, narrativeMarkdown, reportMarkdown: linkSourceReferences(narrativeMarkdown, this.sources), sourceNumbers: numbers, status: "complete", promptMessages });
+      context.numbers = [...new Set(this.accept(await this.search(unit.queries)))];
+      const structuredContext = unit.kind === "race" ? await this.raceContext(unit, context.numbers) : "";
+      context.promptMessages = dossierMessages({ asOf: this.asOf, event: this.event, unit, structuredContext, evidence: this.evidenceFor(context.numbers, unit.name) });
+      this.recordDossier(unit, await this.call(`dossier:${unit.name}`, context.promptMessages, DOSSIER_TOKENS), context, "complete");
       return true;
     } catch (error) {
-      const status = error instanceof BudgetExceededError ? "budget_exhausted" : "error";
-      const message = `${unit.name}: ${describe(error)}`;
-      this.result.limitations.push(message);
-      this.result.dossiers.push({ unit, reportMarkdown: `Research incomplete: ${message}`, sourceNumbers: numbers, status, promptMessages });
-      return status !== "budget_exhausted";
+      return this.recordFailure(unit, error, context);
     }
   }
 

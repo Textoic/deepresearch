@@ -117,7 +117,7 @@ export interface RunLedger {
   finishedAt?: string;
 }
 
-export type StopReason = "complete" | "budget_exhausted" | "missing_resolution_rules" | "no_provider" | "error" | "empty_response" | "output_truncated";
+export type StopReason = "complete" | "partial" | "no_evidence" | "budget_exhausted" | "missing_resolution_rules" | "no_provider" | "error" | "empty_response" | "output_truncated";
 
 export interface ResearchRun {
   id: string;

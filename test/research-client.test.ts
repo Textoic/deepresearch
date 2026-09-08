@@ -12,7 +12,8 @@ class FakeProvider implements InferenceProvider {
 test("general topics use no market fetch or Arena instructions and disclose failed searches", async () => {
   let calls = 0;
   const client = new ResearchClient({ provider: new FakeProvider(), polymarket: new PolymarketClient(async () => { throw new Error("Market network prohibited"); }), searchProvider: { async search() { calls++; throw new Error("unavailable"); } } });
-  const run = await client.researchTopic({ topic: "Shipping disruptions", budgetUsd: 1, effort: "medium" });
+  const sources = [{ url: "https://www.reuters.com/shipping", text: "Port congestion reporting.", retrievedAt: "2026-09-01T00:00:00Z" }];
+  const run = await client.researchTopic({ topic: "Shipping disruptions", budgetUsd: 1, effort: "medium", sources });
   assert.equal(run.event, undefined);
   assert.equal(run.stopReason, "complete");
   assert.equal(calls, 4);
@@ -21,6 +22,27 @@ test("general topics use no market fetch or Arena instructions and disclose fail
   const prompt = JSON.stringify(run.promptMessages);
   assert.doesNotMatch(prompt, /requested lab|leaderboard|Elo|Polymarket/);
   assert.match(prompt, /Shipping disruptions/);
+});
+
+test("a search provider that answers every query with nothing is a retrieval failure, not an empty world", async () => {
+  for (const search of [async () => { throw new Error("unavailable"); }, async () => []]) {
+    let generated = 0;
+    const provider = new FakeProvider();
+    provider.complete = async request => { generated++; return { content: "# invented", model: "fake", provider: "custom", costUsd: 0.01, usage: { inputTokens: 10, outputTokens: 10 } } as never; };
+    const run = await new ResearchClient({ provider, polymarket: market(), searchProvider: { search } }).researchMarket({ slug: "market", budgetUsd: 1, effort: "high" });
+    assert.equal(run.stopReason, "no_evidence");
+    assert.equal(generated, 0);
+    assert.equal(run.decomposition, undefined);
+    assert.doesNotMatch(run.reportMarkdown, /# invented/);
+    assert.ok(run.limitations.some(l => l.startsWith("Every search returned zero documents")));
+  }
+});
+
+test("one retrieved document is enough to keep researching, so the gate is not a blanket refusal", async () => {
+  const found = { url: "https://www.reuters.com/one", text: "a single piece of reporting", retrievedAt: "2026-09-01T00:00:00Z" };
+  const run = await new ResearchClient({ provider: new FakeProvider(), polymarket: market(), searchProvider: { async search() { return [found]; } } }).researchMarket({ slug: "market", budgetUsd: 1 });
+  assert.equal(run.stopReason, "complete");
+  assert.equal(run.sources.length, 1);
 });
 
 test("missing rules skip both search and source adapters", async () => {
@@ -98,4 +120,20 @@ test("client deduplicates retrieved evidence and excludes post-cutoff sources", 
   const run = await client.researchMarket({ slug: "market", budgetUsd: 1, asOf: new Date("2026-06-01T00:00:00Z") });
   assert.equal(run.sources.length, 1);
   assert.equal(run.sources[0]?.url, "https://example.test/a");
+});
+
+test("the section contract is the last thing the writer reads, after the dossiers and limitations", async () => {
+  const client = new ResearchClient({ provider: new FakeProvider(), polymarket: market() });
+  const run = await client.researchMarket({ slug: "market", budgetUsd: 1 });
+  const user = run.promptMessages![1]!.content;
+  assert.match(user, /Required sections, in this order: Resolution rules; Current evidence; Counterevidence and unknowns; What would change the conclusion; Limitations\./);
+  assert.ok(user.indexOf("Required sections") > user.indexOf("Retrieval limitations"));
+  assert.ok(user.trimEnd().endsWith("answer the question rather than listing what was found."));
+});
+
+test("a topic run gets the research-question contract, still placed last", async () => {
+  const run = await new ResearchClient({ provider: new FakeProvider() }).researchTopic({ topic: "Shipping disruptions", budgetUsd: 1 });
+  const user = run.promptMessages![1]!.content;
+  assert.match(user, /Required sections, in this order: Research question;/);
+  assert.ok(user.indexOf("Required sections") > user.indexOf("Retrieval limitations"));
 });

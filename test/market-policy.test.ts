@@ -40,7 +40,8 @@ test("target forecasts are withheld while underlying state race probabilities su
 
 test("high effort separately researches every eligible candidate, stores stages, and replays without retrieval", async () => {
   const queries: string[] = [];
-  const client = new ResearchClient({ provider: provider(), polymarket: new PolymarketClient(async () => new Response(JSON.stringify([event]))), searchProvider: { async search(q) { queries.push(q); return []; } } });
+  const found = { url: "https://www.axios.com/press-office", text: "Reporting on the press office succession.", retrievedAt: "2026-09-01T00:00:00Z" };
+  const client = new ResearchClient({ provider: provider(), polymarket: new PolymarketClient(async () => new Response(JSON.stringify([event]))), searchProvider: { async search(q) { queries.push(q); return [found]; } } });
   const run = await client.researchMarket({ slug: event.slug, budgetUsd: 1, effort: "high" });
   assert.equal(run.stopReason, "complete");
   assert.equal(run.decomposition?.dossiers.filter(d => d.unit.kind === "candidate").length, 2);
@@ -102,4 +103,76 @@ test("a truncated dossier gets one budgeted retry with a larger output allowance
   assert.equal(run.stopReason, "complete");
   assert.equal(run.ledger.calls.length, 6);
   assert.ok(Math.abs(run.ledger.spentUsd - 0.06) < 1e-9);
+});
+
+function truncating(unit: string, times: number): InferenceProvider {
+  const p = provider();
+  const base = p.complete;
+  let seen = 0;
+  p.complete = async request => {
+    if (request.messages.some(m => m.content.includes(`UNIT: ${unit}`)) && seen++ < times) {
+      return { content: `Partial dossier for ${unit} citing [Source 1](https://example.test/a)`, model: "fake", provider: "custom", costUsd: 0.01, usage: { inputTokens: 10, outputTokens: request.maxOutputTokens }, finishReason: "length" };
+    }
+    return base(request);
+  };
+  return p;
+}
+
+async function runWith(p: InferenceProvider) {
+  return new ResearchClient({ provider: p, polymarket: new PolymarketClient(async () => new Response(JSON.stringify([event]))) }).researchMarket({ slug: event.slug, budgetUsd: 1, effort: "high" });
+}
+
+test("a dossier truncated past its retry keeps its researched text and downgrades the run to partial", async () => {
+  const run = await runWith(truncating("Alice Example", 2));
+  assert.equal(run.stopReason, "partial");
+  const alice = run.decomposition?.dossiers.find(d => d.unit.name === "Alice Example");
+  assert.equal(alice?.status, "output_truncated");
+  assert.match(alice!.reportMarkdown, /Partial dossier for Alice Example/);
+  assert.match(alice!.reportMarkdown, /Coverage of this subject stops here/);
+  assert.doesNotMatch(alice!.reportMarkdown, /Research incomplete/);
+  assert.equal(run.decomposition?.dossiers.find(d => d.unit.name === "Bob Example")?.status, "complete");
+});
+
+test("an internal length limit reaches the operator but never the writer's disclosed limitations", async () => {
+  const run = await runWith(truncating("Alice Example", 2));
+  assert.ok(run.limitations.some(l => l.startsWith("Operational: ") && l.includes("Alice Example")));
+  const disclosed = run.promptMessages![1]!.content.split("Retrieval limitations (disclose relevant gaps):")[1]!;
+  assert.doesNotMatch(disclosed, /Operational:|Alice Example|length limit/i);
+  const userMessage = run.promptMessages![1]!.content;
+  assert.doesNotMatch(userMessage, /output_truncated/);
+  assert.match(userMessage, /Alice Example \(candidate; partial coverage\)/);
+});
+
+test("a failed dossier still fails the run, so truncation is not a licence for a broken unit", async () => {
+  const p = provider();
+  const base = p.complete;
+  p.complete = async request => {
+    if (request.messages.some(m => m.content.includes("UNIT: Alice Example"))) throw new Error("provider exploded");
+    return base(request);
+  };
+  const run = await runWith(p);
+  assert.equal(run.stopReason, "error");
+});
+
+test("the writer is given the best-provenance sources with their global citation numbers intact", async () => {
+  const sources = [
+    { url: "https://patriot.university/one", text: "farm rewrite one", retrievedAt: "2026-09-01T00:00:00Z" },
+    { url: "https://realtalkdigest.com/two", text: "farm rewrite two", retrievedAt: "2026-09-01T00:00:00Z" },
+    ...Array.from({ length: 12 }, (_, i) => ({ url: `https://news.meaww.com/${i}`, text: `farm rewrite ${i}`, retrievedAt: "2026-09-01T00:00:00Z" })),
+    { url: "https://www.whitehouse.gov/briefing", text: "official announcement text", retrievedAt: "2026-09-01T00:00:00Z" },
+    { url: "https://www.reuters.com/story", text: "newsroom reporting text", retrievedAt: "2026-09-01T00:00:00Z" },
+  ];
+  const found = { url: "https://www.senate.gov/late-discovery", text: "official record found during unit research", retrievedAt: "2026-09-01T00:00:00Z" };
+  const run = await new ResearchClient({ provider: provider(), polymarket: new PolymarketClient(async () => new Response(JSON.stringify([event]))), searchProvider: { async search() { return [found]; } } })
+    .researchMarket({ slug: event.slug, budgetUsd: 1, effort: "high", sources });
+  const prompt = run.promptMessages!.map(m => m.content).join("\n");
+  assert.match(prompt, /SOURCE 15\ntitle: Untitled\nurl: https:\/\/www\.whitehouse\.gov\/briefing/);
+  assert.match(prompt, /SOURCE 16\ntitle: Untitled\nurl: https:\/\/www\.reuters\.com\/story/);
+  assert.match(prompt, /url: https:\/\/www\.whitehouse\.gov\/briefing\n[\s\S]*?provenance: tier 1 \(primary\/official\)/);
+  assert.doesNotMatch(prompt, /SOURCE \d+\ntitle: Untitled\nurl: https:\/\/news\.meaww\.com\/11/);
+  const summary = run.limitations.filter(l => l.startsWith("Evidence base provenance:"));
+  assert.equal(summary.length, 1);
+  assert.equal(run.sources.length, 17);
+  assert.match(summary[0]!, /2 tier-1[\s\S]*?1 tier-2[\s\S]*?0 tier-3[\s\S]*?14 tier-4/);
+  assert.match(prompt, /Evidence base provenance: 2 tier-1/);
 });

@@ -1,11 +1,12 @@
 import { parseArgs } from "node:util";
 
-export const USAGE = "Usage: budget-research market <slug> --provider ollama|openrouter --model <model> --budget <usd> [--ollama-url <url>] [--searxng-url <url>] [--eval-file <json> --eval-case <id>] [--as-of <date>] [--source <url>] [--query <query>] [--max-output-tokens <count>] [--effort low|medium|high] [--evidence-policy disclose|strict] [--replay-run <directory>] [--out <dir>]";
+export const USAGE = "Usage: budget-research market <slug> --provider ollama|openrouter --model <model> --budget <usd> [--ollama-url <url>] [--searxng-url <url>] [--search serxng|serper|serper-then-searxng] [--serper-key <key>] [--eval-file <json> --eval-case <id>] [--as-of <date>] [--source <url>] [--query <query>] [--max-output-tokens <count>] [--effort low|medium|high] [--evidence-policy disclose|strict] [--replay-run <directory>] [--out <dir>]";
 
 const OPTIONS = {
   help: { type: "boolean", short: "h" },
   provider: { type: "string" }, model: { type: "string" }, budget: { type: "string" },
   "ollama-url": { type: "string" }, "searxng-url": { type: "string" },
+  search: { type: "string" }, "serper-key": { type: "string" },
   "eval-file": { type: "string" }, "eval-case": { type: "string" },
   "as-of": { type: "string" }, "api-key": { type: "string" },
   source: { type: "string", multiple: true }, out: { type: "string" },
@@ -17,6 +18,7 @@ const OPTIONS = {
 } as const;
 
 const PROVIDERS = ["ollama", "openrouter"] as const;
+const SEARCHES = ["searxng", "serper", "serper-then-searxng"] as const;
 const EFFORTS = ["low", "medium", "high"] as const;
 const EVIDENCE_POLICIES = ["disclose", "strict"] as const;
 
@@ -73,6 +75,8 @@ export function parseCliArgs(argv: string[]) {
     effort: oneOf(EFFORTS, values.effort, "low", "--effort must be low, medium, or high."),
     evidencePolicy: oneOf(EVIDENCE_POLICIES, values["evidence-policy"], "disclose", "--evidence-policy must be disclose or strict."),
     maxOutputTokens: parseMaxOutputTokens(values["max-output-tokens"]),
+    search: oneOf(SEARCHES, values.search, "searxng", "--search must be searxng, serper, or serper-then-searxng."),
+    serperKey: values["serper-key"],
     ollamaUrl: values["ollama-url"], searxngUrl: values["searxng-url"],
     evalFile: values["eval-file"], evalCase: values["eval-case"], apiKey: values["api-key"],
     sources: values.source ?? [], queries: values.query, replayRun: values["replay-run"],

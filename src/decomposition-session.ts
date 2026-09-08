@@ -17,6 +17,15 @@ export interface DecompositionOptions {
 
 export type Decomposition = NonNullable<ResearchRun["decomposition"]>;
 
+export class TruncatedOutputError extends Error {
+  readonly partialContent: string;
+  constructor(stage: string, partialContent: string) {
+    super(`${stage}: output reached the length limit`);
+    this.name = "TruncatedOutputError";
+    this.partialContent = partialContent;
+  }
+}
+
 export const MAX_INPUT_TOKENS = 24000;
 export const DOSSIER_TOKENS = 1600;
 export const RETRY_TOKENS = 2400;
@@ -65,6 +74,6 @@ export abstract class DecompositionSession {
     if (!response.content.trim()) throw new Error(`${stage}: empty response`);
     if (!this.truncated(response, maxOutputTokens)) return response.content;
     if (stage.startsWith("dossier:") && maxOutputTokens === DOSSIER_TOKENS) return this.call(`${stage}:length-retry`, messages, RETRY_TOKENS);
-    throw new Error(`${stage}: output truncated`);
+    throw new TruncatedOutputError(stage, response.content);
   }
 }

@@ -25,3 +25,30 @@ test("challenge pages fall back to snippets and explicit page publication dates 
   assert.equal(sources[0]?.text, "Discovery only");
   assert.equal(sources[1]?.publishedAt, "2026-09-01T12:00:00.000Z");
 });
+
+test("an empty result set caused by unavailable engines is retried, then reported as a failed search", async () => {
+  const starved = () => new Response(JSON.stringify({ results: [], unresponsive_engines: [["google", "Suspended: too many requests"]] }));
+  let attempts = 0;
+  const recovering = new SearxngSearchProvider({ baseUrl: "http://searx.local", fetchPages: false, retryDelaysMs: [0, 0], fetchFn: async input => {
+    if (!String(input).includes("/search")) return new Response("x", { headers: { "content-type": "text/plain" } });
+    return ++attempts < 3 ? starved() : new Response(JSON.stringify({ results: [{ url: "https://www.reuters.com/a", content: "recovered" }], unresponsive_engines: [] }));
+  } });
+  const sources = await recovering.search("query", { limit: 3 });
+  assert.equal(attempts, 3);
+  assert.equal(sources[0]?.text, "recovered");
+
+  let tries = 0;
+  const dead = new SearxngSearchProvider({ baseUrl: "http://searx.local", fetchPages: false, retryDelaysMs: [0, 0], fetchFn: async () => { tries++; return starved(); } });
+  await assert.rejects(dead.search("query", { limit: 3 }), /every engine was unavailable/);
+  assert.equal(tries, 3);
+});
+
+test("a genuinely empty result set with every engine healthy is not retried", async () => {
+  let attempts = 0;
+  const provider = new SearxngSearchProvider({ baseUrl: "http://searx.local", fetchPages: false, fetchFn: async () => {
+    attempts++;
+    return new Response(JSON.stringify({ results: [], unresponsive_engines: [] }));
+  } });
+  assert.deepEqual(await provider.search("query with no matches", { limit: 3 }), []);
+  assert.equal(attempts, 1);
+});

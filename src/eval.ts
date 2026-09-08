@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
 import type { ResearchRun } from "./types.ts";
 
+const SCORABLE_STOP_REASONS = new Set(["complete", "partial"]);
+const PARTIAL_COVERAGE_PENALTY = 0.10;
+
 export type EvaluationKind = "evergreen" | "temporal_live" | "resolved_temporal" | "adversarial";
 
 export interface EvaluationCriterion {
@@ -55,8 +58,17 @@ export function evaluateRun(run: ResearchRun, testCase: EvaluationCase): Evaluat
   const forbiddenContentFound = (testCase.forbiddenPhrases ?? []).filter((phrase) => report.includes(phrase.toLocaleLowerCase()));
   const budgetCompliant = run.ledger.spentUsd <= testCase.budgetUsd + 1e-9;
   const citationSignal = /\[[^\]]+\]\(https?:\/\//.test(run.reportMarkdown) ? 1 : 0;
-  const score = run.stopReason !== "complete" || !report.trim() ? 0 : Math.max(0, coverage * 0.75 + citationSignal * 0.15 + (budgetCompliant ? 0.10 : 0) - forbiddenContentFound.length * 0.10);
+  const score = scoreRun({ run, report, coverage, citationSignal, budgetCompliant, forbidden: forbiddenContentFound.length });
   return { caseId: testCase.id, coverage, budgetCompliant, citationSignal, forbiddenContentFound, score, criteria };
+}
+
+interface ScoreInputs { run: ResearchRun; report: string; coverage: number; citationSignal: number; budgetCompliant: boolean; forbidden: number; }
+
+function scoreRun(inputs: ScoreInputs): number {
+  const { run, coverage, citationSignal, budgetCompliant, forbidden } = inputs;
+  if (!SCORABLE_STOP_REASONS.has(run.stopReason) || !inputs.report.trim()) return 0;
+  const penalty = forbidden * 0.10 + (run.stopReason === "partial" ? PARTIAL_COVERAGE_PENALTY : 0);
+  return Math.max(0, coverage * 0.75 + citationSignal * 0.15 + (budgetCompliant ? 0.10 : 0) - penalty);
 }
 
 function scoreCriterion(report: string, run: ResearchRun, criterion: EvaluationCriterion): CriterionResult {

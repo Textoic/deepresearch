@@ -1,5 +1,5 @@
 import { selectEvidence, type EvidencePolicy } from "./evidence.ts";
-import { linkSourceReferences } from "./citations.ts";
+import { citationIntegrityLimitation, linkSourceReferences, unfoundedCitations } from "./citations.ts";
 import { renderSenateReport } from "./senate-report.ts";
 import { normalizeMarketEvent } from "./market-policy.ts";
 import { decomposeMarket } from "./market-decomposition.ts";
@@ -10,7 +10,8 @@ import { BudgetExceededError, BudgetGuard } from "./budget.ts";
 import { PolymarketClient } from "./polymarket.ts";
 import { isArenaTarget } from "./arena.ts";
 import { buildMessages, preliminaryReport, sourceLimitations, topicReport } from "./report-prompt.ts";
-import { annotate, arenaContext, finalStopReason, resolutionRules, synthesisSources, validatedPolicy, withArenaFraming, withDecomposition, type GenerationOutcome } from "./run-assembly.ts";
+import { annotate, arenaContext, finalStopReason, NO_EVIDENCE, resolutionRules, retrievalCollapsed, synthesisSources, validatedPolicy, withArenaFraming, withDecomposition, type GenerationOutcome } from "./run-assembly.ts";
+import { evidenceBaseSummary } from "./source-tier.ts";
 import type { ChatMessage, InferenceProvider, PolymarketEvent, ResearchMarketRequest, ResearchRun, RunStore, SearchProvider, SourceDocument, ResearchTopicRequest } from "./types.ts";
 
 export interface ResearchClientOptions {
@@ -38,6 +39,7 @@ const MAX_QUERIES = 8;
 const RESULTS_PER_QUERY = 6;
 const MAX_INPUT_TOKENS = 24_000;
 const DEFAULT_OUTPUT_TOKENS = 4_096;
+const DEGRADABLE_STOP_REASONS = new Set(["complete", "partial"]);
 
 export class ResearchClient {
   private readonly market: PolymarketClient;
@@ -82,7 +84,8 @@ export class ResearchClient {
   }
 
   private async generate(request: ResearchMarketRequest, state: { event: PolymarketEvent; asOf: string; sources: SourceDocument[]; arenaEvidence: ResearchRun["arenaEvidence"]; decomposition: ResearchRun["decomposition"]; limitations: string[]; topicMode: boolean; guard: BudgetGuard; fallback: string }): Promise<GenerationOutcome> {
-    const messages = annotate(buildMessages({ event: state.event, asOf: state.asOf, sources: synthesisSources(state.sources, state.decomposition), requirements: request.requirements ?? [], arenaEvidence: state.arenaEvidence, topicMode: state.topicMode }), state.decomposition, state.arenaEvidence, state.limitations);
+    const prompt = buildMessages({ event: state.event, asOf: state.asOf, sources: synthesisSources(state.sources, state.decomposition, state.event), requirements: request.requirements ?? [], arenaEvidence: state.arenaEvidence, topicMode: state.topicMode });
+    const messages = annotate(prompt, { decomposition: state.decomposition, arenaEvidence: state.arenaEvidence, limitations: state.limitations, topicMode: state.topicMode });
     const chatRequest = { messages, maxInputTokens: MAX_INPUT_TOKENS, maxOutputTokens: request.maxOutputTokens ?? DEFAULT_OUTPUT_TOKENS, thinking: request.thinking ?? false, temperature: 0.2 } as const;
     const generation: ResearchRun["generation"] = { model: this.options.provider.model, thinking: chatRequest.thinking, maxOutputTokens: chatRequest.maxOutputTokens, promptCharacters: messages.reduce((total, message) => total + message.content.length, 0) };
     try {
@@ -119,17 +122,36 @@ export class ResearchClient {
     return "error";
   }
 
-  private async writeReport(request: ResearchMarketRequest, state: { event: PolymarketEvent; asOf: string; sources: SourceDocument[]; arenaEvidence: ResearchRun["arenaEvidence"]; decomposition: ResearchRun["decomposition"]; limitations: string[]; topicMode: boolean; guard: BudgetGuard; canResearch: boolean }): Promise<GenerationOutcome> {
+  private async writeReport(request: ResearchMarketRequest, state: { event: PolymarketEvent; asOf: string; sources: SourceDocument[]; arenaEvidence: ResearchRun["arenaEvidence"]; decomposition: ResearchRun["decomposition"]; limitations: string[]; topicMode: boolean; guard: BudgetGuard; canResearch: boolean; noEvidence: boolean }): Promise<GenerationOutcome> {
     const fallback = state.topicMode ? topicReport(state.event, state.asOf, state.sources, state.limitations) : preliminaryReport(state.event, state.asOf, state.sources, state.limitations);
     if (!state.canResearch) {
       state.limitations.push("Gamma metadata has no resolution source. The system will not invent a forecast.");
       return { reportMarkdown: fallback, stopReason: "missing_resolution_rules" };
     }
+    if (state.noEvidence) return { reportMarkdown: fallback, stopReason: "no_evidence" };
     const roster = state.decomposition?.senateRoster;
     if (roster && state.decomposition?.raceOdds?.length) {
       return { reportMarkdown: renderSenateReport(state.event, state.asOf, state.decomposition.raceOdds, roster), stopReason: "complete" };
     }
     return this.generate(request, { ...state, fallback });
+  }
+
+  private auditCitations(reportMarkdown: string, sources: SourceDocument[], limitations: string[], stopReason: ResearchRun["stopReason"]): ResearchRun["stopReason"] {
+    const unfounded = unfoundedCitations(reportMarkdown, sources);
+    if (!unfounded.length) return stopReason;
+    limitations.push(citationIntegrityLimitation(unfounded));
+    return DEGRADABLE_STOP_REASONS.has(stopReason) ? "partial" : stopReason;
+  }
+
+  private async planResearch(event: PolymarketEvent, request: ResearchMarketRequest, state: { asOf: string; evidence: EvidenceBundle; guard: BudgetGuard; canResearch: boolean; topicMode: boolean; options: RunOptions }): Promise<{ noEvidence: boolean; decomposition: ResearchRun["decomposition"] }> {
+    const { sources, retrieval, limitations } = state.evidence;
+    if (retrievalCollapsed(retrieval, sources)) {
+      limitations.push(NO_EVIDENCE);
+      return { noEvidence: true, decomposition: undefined };
+    }
+    const decomposition = await this.resolveDecomposition(event, request, state);
+    if (decomposition) this.applyDecomposition(decomposition, sources, limitations);
+    return { noEvidence: false, decomposition };
   }
 
   private async runResearch(original: PolymarketEvent, request: ResearchMarketRequest, options: RunOptions = {}): Promise<ResearchRun> {
@@ -141,13 +163,13 @@ export class ResearchClient {
     const canResearch = topicMode || !!event.resolutionSource?.trim();
     const evidence = await this.gatherEvidence(event, request, { asOf, policy, canResearch, skipRetrieval: !!options.parentRunId, topicMode });
     const { sources, retrieval, limitations } = evidence;
-    const decomposition = await this.resolveDecomposition(event, request, { asOf, evidence, guard, canResearch, topicMode, options });
-    if (decomposition) this.applyDecomposition(decomposition, sources, limitations);
+    const { noEvidence, decomposition } = await this.planResearch(event, request, { asOf, evidence, guard, canResearch, topicMode, options });
+    limitations.push(evidenceBaseSummary(sources));
     const arenaEvidence = arenaContext(event, sources, asOf);
     if (arenaEvidence) limitations.push(...arenaEvidence.snapshot.issues);
-    const outcome = await this.writeReport(request, { event, asOf, sources, arenaEvidence, decomposition, limitations, topicMode, guard, canResearch });
+    const outcome = await this.writeReport(request, { event, asOf, sources, arenaEvidence, decomposition, limitations, topicMode, guard, canResearch, noEvidence });
     const reportMarkdown = this.assemble(outcome, arenaEvidence, decomposition);
-    const stopReason = finalStopReason(outcome, decomposition);
+    const stopReason = this.auditCitations(reportMarkdown, sources, limitations, finalStopReason(outcome, decomposition));
     const run: ResearchRun = { id: randomUUID(), topic: event.title, asOf, createdAt: guard.ledger.startedAt, event: topicMode ? undefined : event, sources, retrieval, reportMarkdown,
       narrativeMarkdown: outcome.narrativeMarkdown, arenaEvidence, decomposition, ledger: guard.finish(), stopReason, limitations,
       generation: outcome.generation, promptMessages: outcome.promptMessages, parentRunId: options.parentRunId };

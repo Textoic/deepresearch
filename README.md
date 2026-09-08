@@ -184,6 +184,40 @@ Invoke-RestMethod "http://127.0.0.1:8080/search?q=arena.ai&format=json"
 
 The port binds only to `127.0.0.1`; the generated SearXNG secret is held in ignored `.env`. Stop it with `docker compose down` (the named search cache remains); remove the cache explicitly with `docker compose down --volumes`.
 
+`searxng/settings.yml` pins the engine list rather than accepting SearXNG's defaults, which enable `duckduckgo`, `startpage` and `google cse` while leaving `google` off. See `architecture.md` for the measurements behind that choice. After editing the file, apply it with `docker compose restart searxng` and confirm with:
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:8080/config" | % engines | ? { $_.name -in "google","brave","yep","mojeek" } | Select name, enabled
+```
+
+### Serper (hosted Google results)
+
+SearXNG scrapes engines that defend themselves, so it degrades without warning. `SerperSearchProvider` is a hosted alternative: Google's own results as JSON, billed per query, with 2,500 free queries on signup.
+
+1. Sign up at [serper.dev](https://serper.dev) and copy the API key from the dashboard.
+2. Put it in the ignored `.env` as `SERPER_API_KEY=...`, or pass `--serper-key`.
+3. Choose the retrieval path with `--search`:
+
+```powershell
+$env:SERPER_API_KEY = "your-key"
+pnpm start -- market <slug> --provider ollama --model qwen3.8:27b --budget 0 --search serper-then-searxng --searxng-url http://127.0.0.1:8080
+```
+
+- `--search searxng` (default) — local only, no spend.
+- `--search serper` — Serper only.
+- `--search serper-then-searxng` — Serper first, falling back to SearXNG for any query Serper fails. Needs `--searxng-url` too.
+
+Serper returns links and snippets, not page text, so the pipeline still fetches and snapshots pages itself exactly as it does for SearXNG. A full three-market batch is about 170 searches, so roughly $0.17 at the entry price of $1 per 1,000 queries; the free allowance covers about 14 batches. `SERPER_API_KEY` is read from the environment and is never written into run artefacts.
+
+```ts
+import { FallbackSearchProvider, SearxngSearchProvider, SerperSearchProvider } from "budget-researcher";
+
+const searchProvider = new FallbackSearchProvider([
+  { id: "serper", provider: new SerperSearchProvider({ apiKey: process.env.SERPER_API_KEY!, freshness: "qdr:m" }) },
+  { id: "searxng", provider: new SearxngSearchProvider({ baseUrl: "http://127.0.0.1:8080" }) },
+]);
+```
+
 ```ts
 import { OllamaProvider, ResearchClient, SearxngSearchProvider } from "budget-researcher";
 
@@ -215,7 +249,7 @@ For OpenRouter, set `OPENROUTER_API_KEY` in your shell and change `--provider`,
 `--model`, and `--budget` accordingly. `--help` lists available flags;
 `--ollama-url` overrides the default `http://127.0.0.1:11434`.
 
-For local inference, use `--provider ollama --model <local-model>`. `--searxng-url` enables automatic search and bounded page snapshots; each optional `--source` is also stored as evidence. Without either source input or a search adapter, the report explicitly says that it has only market metadata.
+For local inference, use `--provider ollama --model <local-model>`. `--searxng-url` enables automatic search and bounded page snapshots, and `--search serper|serper-then-searxng` swaps in or falls back from hosted Google results; each optional `--source` is also stored as evidence. Without either source input or a search adapter, the report explicitly says that it has only market metadata.
 
 ## Library use
 

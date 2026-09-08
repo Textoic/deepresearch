@@ -1,92 +1,63 @@
+import { deadline, PageContentFetcher, validWebUrl, type SearchHit } from "./page-content.ts";
 import type { SearchProvider, SourceDocument } from "../types.ts";
 
 interface SearxngResult { url?: string; title?: string; content?: string; publishedDate?: string; }
-interface SearxngResponse { results?: SearxngResult[]; }
+interface SearxngResponse { results?: SearxngResult[]; unresponsive_engines?: unknown[]; }
 
 const SEARCH_TIMEOUT_MS = 30000;
-const PAGE_TIMEOUT_MS = 20000;
-const MAX_RAW_CHARACTERS = 1_000_000;
-const MAX_PLAIN_CHARACTERS = 200_000;
-const SHORT_PAGE_CHARACTERS = 120;
-const CHALLENGE = /prove your humanity|verify you are human|access denied|enable javascript and cookies/i;
-const SHORT_PAGE_HOSTS = /(?:facebook|reddit)\.com/i;
-const PUBLISHED_META = /<meta[^>]+(?:property|name)=["'](?:article:published_time|datePublished|pubdate)["'][^>]+content=["']([^"']+)/i;
+const EMPTY_RETRY_DELAYS_MS = [2000, 6000];
 
-function deadline(signal: AbortSignal | undefined, milliseconds: number): AbortSignal {
-  const timeout = AbortSignal.timeout(milliseconds);
-  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+function pause(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, milliseconds);
+    signal?.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+  });
 }
 
-function validWebUrl(value: unknown): value is string {
-  try {
-    const url = new URL(String(value));
-    return url.protocol === "https:" || url.protocol === "http:";
-  } catch { return false; }
+function starvedByEngines(payload: SearxngResponse): boolean {
+  return !payload.results?.length && !!payload.unresponsive_engines?.length;
 }
 
-function stripHtml(html: string): string {
-  return html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function isBlocked(text: string, url: string): boolean {
-  if (!text.trim()) return true;
-  if (text.length < SHORT_PAGE_CHARACTERS && SHORT_PAGE_HOSTS.test(url)) return true;
-  return CHALLENGE.test(text.slice(0, 1500));
-}
-
-function publishedAtOf(raw: string, result: SearxngResult): string | undefined {
-  if (result.publishedDate) return result.publishedDate;
-  const declared = PUBLISHED_META.exec(raw)?.[1];
-  return declared && Number.isFinite(Date.parse(declared)) ? new Date(declared).toISOString() : undefined;
-}
-
-function snippetSource(result: SearxngResult, retrievedAt: string, retrievalError?: string): SourceDocument {
-  return { url: result.url!, title: result.title, text: result.content ?? "", publishedAt: result.publishedDate, retrievedAt, sourceTier: 2, retrievalKind: "snippet", ...(retrievalError ? { retrievalError } : {}) };
-}
-
-async function readPageText(response: Response): Promise<{ raw: string; text: string }> {
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.startsWith("text/")) throw new Error(`Unsupported page type: ${contentType}`);
-  const raw = (await response.text()).slice(0, MAX_RAW_CHARACTERS);
-  return { raw, text: contentType.includes("text/html") ? stripHtml(raw) : raw.slice(0, MAX_PLAIN_CHARACTERS) };
+function toHit(result: SearxngResult): SearchHit {
+  return { url: result.url!, title: result.title, snippet: result.content, publishedAt: result.publishedDate };
 }
 
 export class SearxngSearchProvider implements SearchProvider {
   private readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
-  private readonly fetchPages: boolean;
-  constructor(options: { baseUrl: string; fetchPages?: boolean; fetchFn?: typeof fetch }) {
+  private readonly pages: PageContentFetcher;
+  private readonly retryDelaysMs: number[];
+
+  constructor(options: { baseUrl: string; fetchPages?: boolean; fetchFn?: typeof fetch; retryDelaysMs?: number[] }) {
     this.baseUrl = options.baseUrl;
-    this.fetchPages = options.fetchPages ?? true;
     this.fetchFn = options.fetchFn ?? fetch;
+    this.pages = new PageContentFetcher(options);
+    this.retryDelaysMs = options.retryDelaysMs ?? EMPTY_RETRY_DELAYS_MS;
   }
 
   async search(query: string, options: { limit: number; signal?: AbortSignal }): Promise<SourceDocument[]> {
+    const payload = await this.resilientQuery(query, options.signal);
+    const results = (payload.results ?? []).slice(0, options.limit).filter((result) => validWebUrl(result.url));
+    return Promise.all(results.map((result) => this.pages.toSource(toHit(result), options.signal)));
+  }
+
+  private async requestOnce(query: string, signal?: AbortSignal): Promise<SearxngResponse> {
     const endpoint = new URL("/search", this.baseUrl);
     endpoint.searchParams.set("q", query);
     endpoint.searchParams.set("format", "json");
-    const response = await this.fetchFn(endpoint, { headers: { accept: "application/json" }, signal: deadline(options.signal, SEARCH_TIMEOUT_MS) });
+    const response = await this.fetchFn(endpoint, { headers: { accept: "application/json" }, signal: deadline(signal, SEARCH_TIMEOUT_MS) });
     if (!response.ok) throw new Error(`SearXNG returned ${response.status}. Ensure its JSON format is enabled.`);
-    const payload = await response.json() as SearxngResponse;
-    const results = (payload.results ?? []).slice(0, options.limit).filter((result) => validWebUrl(result.url));
-    return Promise.all(results.map((result) => this.toSource(result, options.signal)));
+    return await response.json() as SearxngResponse;
   }
 
-  private async toSource(result: SearxngResult, signal?: AbortSignal): Promise<SourceDocument> {
-    const retrievedAt = new Date().toISOString();
-    if (!this.fetchPages) return snippetSource(result, retrievedAt);
-    try {
-      return await this.fetchPage(result, retrievedAt, signal);
-    } catch (error) {
-      return snippetSource(result, retrievedAt, String(error));
+  private async resilientQuery(query: string, signal?: AbortSignal): Promise<SearxngResponse> {
+    let payload = await this.requestOnce(query, signal);
+    for (const delay of this.retryDelaysMs) {
+      if (!starvedByEngines(payload)) return payload;
+      await pause(delay, signal);
+      payload = await this.requestOnce(query, signal);
     }
-  }
-
-  private async fetchPage(result: SearxngResult, retrievedAt: string, signal?: AbortSignal): Promise<SourceDocument> {
-    const response = await this.fetchFn(result.url!, { headers: { accept: "text/html,text/plain" }, signal: deadline(signal, PAGE_TIMEOUT_MS) });
-    if (!response.ok) throw new Error(String(response.status));
-    const { raw, text } = await readPageText(response);
-    if (isBlocked(text, result.url!)) throw new Error("Blocked or empty page; preserving discovery snippet only");
-    return { url: result.url!, title: result.title, text: text || result.content || "", publishedAt: publishedAtOf(raw, result), retrievedAt, sourceTier: 2, retrievalKind: "page" };
+    if (starvedByEngines(payload)) throw new Error(`SearXNG returned no results; every engine was unavailable: ${JSON.stringify(payload.unresponsive_engines)}`);
+    return payload;
   }
 }

@@ -2,11 +2,15 @@
 import { parseCliArgs, USAGE } from "./cli-args.ts";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { evaluateRun, FileRunStore, loadEvaluationCases, OllamaProvider, OpenRouterProvider, ResearchClient, SearxngSearchProvider } from "./index.ts";
+import { evaluateRun, FallbackSearchProvider, FileRunStore, loadEvaluationCases, OllamaProvider, OpenRouterProvider, ResearchClient, SearxngSearchProvider, SerperSearchProvider } from "./index.ts";
+import type { SearchProvider } from "./types.ts";
 import type { EvaluationCase } from "./eval.ts";
+import { classifySourceTier } from "./source-tier.ts";
 import type { ResearchRun, SourceDocument } from "./types.ts";
 
 type Flags = ReturnType<typeof parseCliArgs> & { help: false };
+
+const CLEAN_STOP_REASONS = new Set(["complete", "partial"]);
 
 const EVALUATOR_NOTE = "Keyword checks are diagnostic only, not semantic validation or citation verification.";
 
@@ -33,8 +37,22 @@ async function loadSources(urls: string | string[]): Promise<SourceDocument[]> {
     const response = await fetch(url, { headers: { accept: "text/html,text/plain,application/json" }, signal: AbortSignal.timeout(30000) });
     if (!response.ok) throw new Error(`Source fetch failed for ${url}: ${response.status}`);
     const raw = await response.text();
-    return { url, text: toPlainText(raw), retrievedAt: new Date().toISOString(), sourceTier: 2 as const, retrievalKind: "page" as const };
+    return { url, text: toPlainText(raw), retrievedAt: new Date().toISOString(), sourceTier: classifySourceTier(url), retrievalKind: "page" as const };
   }));
+}
+
+function serperKeyOf(flags: Flags): string {
+  const key = flags.serperKey ?? process.env.SERPER_API_KEY ?? "";
+  if (!key.trim()) throw new Error("--search serper requires --serper-key or the SERPER_API_KEY environment variable.");
+  return key;
+}
+
+function createSearchProvider(flags: Flags): SearchProvider | undefined {
+  const searxng = flags.searxngUrl ? new SearxngSearchProvider({ baseUrl: flags.searxngUrl }) : undefined;
+  if (flags.search === "searxng") return searxng;
+  const serper = new SerperSearchProvider({ apiKey: serperKeyOf(flags) });
+  if (flags.search === "serper" || !searxng) return serper;
+  return new FallbackSearchProvider([{ id: "serper", provider: serper }, { id: "searxng", provider: searxng }]);
 }
 
 function buildRequest(flags: Flags, evaluationCase: EvaluationCase | undefined, sources: SourceDocument[]) {
@@ -54,7 +72,7 @@ function reportRun(run: ResearchRun): void {
   if (snapshot) console.error(`arena_extraction=${snapshot.status} data_date=${snapshot.dataDate ?? "unknown"} parsed_rows=${snapshot.rows.length} complete_board=${snapshot.completeBoard}; narrative still requires factual review`);
   if (run.stopReason === "complete") return;
   for (const limitation of run.limitations) console.error(limitation);
-  process.exitCode = 1;
+  if (!CLEAN_STOP_REASONS.has(run.stopReason)) process.exitCode = 1;
 }
 
 async function writeEvaluation(outDirectory: string, run: ResearchRun, evaluationCase: EvaluationCase): Promise<void> {
@@ -71,7 +89,7 @@ async function main() {
   const evaluationCase = await selectEvaluationCase(flags);
   console.error(flags.replayRun ? "Reusing saved event and evidence; no retrieval calls." : "Fetching supplied sources and market metadata...");
   const sources = flags.replayRun ? [] : await loadSources(flags.sources);
-  const searchProvider = flags.searxngUrl ? new SearxngSearchProvider({ baseUrl: flags.searxngUrl }) : undefined;
+  const searchProvider = createSearchProvider(flags);
   const client = new ResearchClient({ provider: createProvider(flags), searchProvider, store: new FileRunStore(flags.out) });
   console.error(`Researching with ${flags.model}; up to ${flags.maxOutputTokens} output tokens. Local generation may take several minutes.`);
   const run = await executeRun(client, flags, buildRequest(flags, evaluationCase, sources));

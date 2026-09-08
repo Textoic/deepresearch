@@ -2,7 +2,8 @@ import { extractArenaSnapshot, isArenaTarget, renderArenaSnapshot } from "./aren
 import { buildArenaEvidenceBrief } from "./evidence-brief.ts";
 import { renderDossiers, synthesisContext } from "./decomposition-render.ts";
 import { renderSenateEvidence } from "./senate-report.ts";
-import { selectExcerpt } from "./report-prompt.ts";
+import { sectionContract, selectExcerpt, type NumberedSource } from "./report-prompt.ts";
+import { byProvenance } from "./source-tier.ts";
 import type { EvidencePolicy } from "./evidence.ts";
 import type { ChatMessage, PolymarketEvent, ResearchMarketRequest, ResearchRun, SourceDocument } from "./types.ts";
 
@@ -14,10 +15,11 @@ export interface GenerationOutcome {
   promptMessages?: ChatMessage[];
 }
 
-const SYNTHESIS_SOURCES = 6;
+const SYNTHESIS_SOURCES = 10;
 const SYNTHESIS_EXCERPT_CHARACTERS = 1400;
-const SYNTHESIS_TERMS = new Set(["seats", "incumbent", "majority", "vice", "caucus", "announced"]);
 const INCOMPLETE_DISCOVERY = /Discovery incomplete|Not every planned/;
+
+export const OPERATIONAL_PREFIX = "Operational: ";
 
 export function validatedPolicy(request: ResearchMarketRequest): EvidencePolicy {
   const policy = request.evidencePolicy ?? "disclose";
@@ -58,13 +60,24 @@ export function withArenaFraming(reportMarkdown: string, arenaEvidence: Research
   return `${renderArenaSnapshot(arenaEvidence.snapshot)}\n## Chronology guardrails\n\n${arenaEvidence.brief.warnings.join("\n\n")}\n\n${chronologyNotes(arenaEvidence).join("\n")}\n\n## Model-written analysis (requires review)\n\n${narrativeMarkdown}`;
 }
 
-function decompositionFailed(decomposition: NonNullable<ResearchRun["decomposition"]>): boolean {
-  return decomposition.dossiers.some(dossier => dossier.status !== "complete") || decomposition.limitations.some(limitation => INCOMPLETE_DISCOVERY.test(limitation));
-}
-
 export function finalStopReason(outcome: GenerationOutcome, decomposition: ResearchRun["decomposition"]): ResearchRun["stopReason"] {
   if (!decomposition || outcome.stopReason !== "complete") return outcome.stopReason;
-  return decompositionFailed(decomposition) ? "error" : "complete";
+  const failures = decomposition.dossiers.map(dossier => dossier.status).filter(status => status !== "complete");
+  if (failures.includes("budget_exhausted")) return "budget_exhausted";
+  if (failures.some(status => status !== "output_truncated")) return "error";
+  const incompleteDiscovery = decomposition.limitations.some(limitation => INCOMPLETE_DISCOVERY.test(limitation));
+  return failures.length || incompleteDiscovery ? "partial" : "complete";
+}
+
+export const NO_EVIDENCE = "Every search returned zero documents, so this run gathered no external evidence. A search provider that answers without results is a retrieval failure, not proof that nothing has been published. No report was generated from it.";
+
+export function retrievalCollapsed(retrieval: NonNullable<ResearchRun["retrieval"]>, sources: SourceDocument[]): boolean {
+  if (sources.length || !retrieval.searches.length) return false;
+  return retrieval.searches.every(search => search.status === "failed" || search.documents === 0);
+}
+
+export function writerLimitations(limitations: string[]): string[] {
+  return limitations.filter(limitation => !limitation.startsWith(OPERATIONAL_PREFIX));
 }
 
 export function withDecomposition(reportMarkdown: string, decomposition: NonNullable<ResearchRun["decomposition"]>): string {
@@ -73,16 +86,35 @@ export function withDecomposition(reportMarkdown: string, decomposition: NonNull
   return senateEvidence + reportMarkdown + renderDossiers(decomposition);
 }
 
-export function synthesisSources(sources: SourceDocument[], decomposition: ResearchRun["decomposition"]): SourceDocument[] {
-  if (!decomposition?.dossiers.length) return sources;
-  return sources.slice(0, SYNTHESIS_SOURCES).map(source => ({ ...source, text: selectExcerpt(source.text, SYNTHESIS_EXCERPT_CHARACTERS, SYNTHESIS_TERMS) }));
+function synthesisTerms(event: PolymarketEvent): Set<string> {
+  return new Set(event.title.toLowerCase().match(/[a-z0-9]{4,}/g) ?? []);
 }
 
-export function annotate(messages: ChatMessage[], decomposition: ResearchRun["decomposition"], arenaEvidence: ResearchRun["arenaEvidence"], limitations: string[]): ChatMessage[] {
+export function synthesisSources(sources: SourceDocument[], decomposition: ResearchRun["decomposition"], event: PolymarketEvent): NumberedSource[] {
+  const numbered: NumberedSource[] = sources.map((source, index) => ({ number: index + 1, source }));
+  if (!decomposition?.dossiers.length) return numbered;
+  const terms = synthesisTerms(event);
+  return [...numbered]
+    .sort((a, b) => byProvenance(a.source, b.source) || a.number - b.number)
+    .slice(0, SYNTHESIS_SOURCES)
+    .sort((a, b) => a.number - b.number)
+    .map(entry => ({ number: entry.number, source: { ...entry.source, text: selectExcerpt(entry.source.text, SYNTHESIS_EXCERPT_CHARACTERS, terms) } }));
+}
+
+export interface Annotations {
+  decomposition: ResearchRun["decomposition"];
+  arenaEvidence: ResearchRun["arenaEvidence"];
+  limitations: string[];
+  topicMode: boolean;
+}
+
+export function annotate(messages: ChatMessage[], annotations: Annotations): ChatMessage[] {
+  const { decomposition, arenaEvidence } = annotations;
   const extras = [
     decomposition ? `\n\n${synthesisContext(decomposition)}` : "",
     arenaEvidence ? "\nWrite NARRATIVE ONLY; the application renders the structured table separately." : "",
-    `\n\nRetrieval limitations (disclose relevant gaps):\n${limitations.join("\n")}`,
+    `\n\nRetrieval limitations (disclose relevant gaps):\n${writerLimitations(annotations.limitations).join("\n")}`,
+    `\n\n${sectionContract(annotations.topicMode)}`,
   ];
   messages[1]!.content += extras.join("");
   return messages;
