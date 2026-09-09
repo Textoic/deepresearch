@@ -1,6 +1,6 @@
 import { candidateName } from "./market-policy.ts";
 import { resolutionQueries, resolutionUnits } from "./resolution-research.ts";
-import type { PolymarketEvent, ResearchRun, ResearchUnit, SearchProvider, SourceDocument } from "./types.ts";
+import type { PolymarketEvent, ResearchMarketRequest, ResearchRun, ResearchUnit, SearchProvider, SourceDocument } from "./types.ts";
 
 const CLASS_II_2026 = "Alabama,Alaska,Arkansas,Colorado,Delaware,Georgia,Idaho,Illinois,Iowa,Kansas,Kentucky,Louisiana,Maine,Massachusetts,Michigan,Minnesota,Mississippi,Montana,Nebraska,New Hampshire,New Jersey,New Mexico,North Carolina,Oklahoma,Oregon,Rhode Island,South Carolina,South Dakota,Tennessee,Texas,Virginia,West Virginia,Wyoming".split(",");
 const SPECIAL_ELECTIONS_2026 = ["Florida special", "Ohio special"];
@@ -112,4 +112,15 @@ export function namedUnit(value: unknown): NamedUnit | undefined {
 export function dependencyQueries(raw: unknown): string[] | undefined {
   if (!Array.isArray(raw) || !raw.length || !raw.every(query => typeof query === "string")) return undefined;
   return (raw as string[]).slice(0, MAX_DEPENDENCY_QUERIES).map(query => query.slice(0, MAX_QUERY_LENGTH));
+}
+
+const MAX_QUERIES = 8;
+
+export function retrievalQueries(event: PolymarketEvent, request: ResearchMarketRequest, topicMode: boolean): string[] {
+  const effort = request.effort ?? "low";
+  const defaults = !topicMode && effort === "high" ? discoveryQueries(event) : [event.title, `${event.title} ${event.resolutionSource ?? "primary sources"}`];
+  if (effort !== "low") defaults.push(`${event.title} latest developments`, `${event.title} contrary evidence uncertainty`);
+  if (effort === "high") defaults.push(`${event.title} historical data methodology`, `${event.title} limitations revisions alternative explanations`);
+  const requested = request.queries?.length ? request.queries : defaults;
+  return [...new Set(requested.map(query => query.trim()).filter(Boolean))].slice(0, MAX_QUERIES);
 }

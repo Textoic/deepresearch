@@ -13,12 +13,16 @@
   "bin": {
     "budget-research": "./dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node tools/lint.mjs && tsc -p tsconfig.json && tsx --test test/*.test.ts",
     "check": "tsc -p tsconfig.json --noEmit",
     "start": "tsc -p tsconfig.json && node dist/cli.js",
-    "lint": "node tools/lint.mjs"
+    "lint": "node tools/lint.mjs",
+    "prepare": "tsc -p tsconfig.json"
   },
   "engines": {
     "node": ">=22.0.0"

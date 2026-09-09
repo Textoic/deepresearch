@@ -4,7 +4,7 @@ import { renderSenateReport } from "./senate-report.ts";
 import { normalizeMarketEvent } from "./market-policy.ts";
 import { clarificationAdapters } from "./clarification-adapter.ts";
 import { decomposeMarket } from "./market-decomposition.ts";
-import { discoveryQueries } from "./market-units.ts";
+import { retrievalQueries } from "./market-units.ts";
 import { collectAdapterSources, extractSourceUrls, type SourceAdapter } from "./source-adapters.ts";
 import { randomUUID } from "node:crypto";
 import { BudgetExceededError, BudgetGuard } from "./budget.ts";
@@ -36,7 +36,6 @@ interface EvidenceBundle {
 }
 
 const RETRIEVAL_TIMEOUT_MS = 30_000;
-const MAX_QUERIES = 8;
 const RESULTS_PER_QUERY = 6;
 const MAX_INPUT_TOKENS = 24_000;
 const DEFAULT_OUTPUT_TOKENS = 4_096;
@@ -49,6 +48,10 @@ export class ResearchClient {
 
   async researchMarket(request: ResearchMarketRequest): Promise<ResearchRun> {
     const event = await this.market.getEventBySlug(request.slug);
+    return this.runResearch(event, request);
+  }
+
+  async researchEvent(event: PolymarketEvent, request: ResearchMarketRequest): Promise<ResearchRun> {
     return this.runResearch(event, request);
   }
 
@@ -196,21 +199,12 @@ export class ResearchClient {
     const searches: Array<{ query: string; status: "complete" | "failed"; documents: number }> = [];
     const sources: SourceDocument[] = [];
     if (!this.options.searchProvider) return { sources, searches };
-    const queries = this.planQueries(event, request, topicMode);
+    const queries = retrievalQueries(event, request, topicMode);
     const responses = await Promise.allSettled(queries.map(query => this.options.searchProvider!.search(query, { limit: RESULTS_PER_QUERY, signal: AbortSignal.timeout(RETRIEVAL_TIMEOUT_MS) })));
     responses.forEach((result, index) => {
       searches.push({ query: queries[index]!, status: result.status === "fulfilled" ? "complete" : "failed", documents: result.status === "fulfilled" ? result.value.length : 0 });
       if (result.status === "fulfilled") sources.push(...result.value);
     });
     return { sources, searches };
-  }
-
-  private planQueries(event: PolymarketEvent, request: ResearchMarketRequest, topicMode: boolean): string[] {
-    const effort = request.effort ?? "low";
-    const defaults = !topicMode && effort === "high" ? discoveryQueries(event) : [event.title, `${event.title} ${event.resolutionSource ?? "primary sources"}`];
-    if (effort !== "low") defaults.push(`${event.title} latest developments`, `${event.title} contrary evidence uncertainty`);
-    if (effort === "high") defaults.push(`${event.title} historical data methodology`, `${event.title} limitations revisions alternative explanations`);
-    const requested = request.queries?.length ? request.queries : defaults;
-    return [...new Set(requested.map(query => query.trim()).filter(Boolean))].slice(0, MAX_QUERIES);
   }
 }
