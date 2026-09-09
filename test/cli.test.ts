@@ -30,7 +30,7 @@ test("compiled CLI retrieves evidence, passes requirements to Ollama and evaluat
   try {
     const { stdout, stderr } = await promisify(execFile)(process.execPath, [
       "--import", new URL("./fixtures/cli-fetch.mjs", import.meta.url).href,
-      "dist/cli.js", "--", ...argv, "--out", output,
+      "dist/cli.js", "--", ...argv, "--out", output, "--clarification-file", "test/fixtures/resolution-clarifications.json",
     ], { cwd: fileURLToPath(new URL("../", import.meta.url)), timeout: 15000 });
     assert.match(stdout, /Fixture report/);
     assert.match(stderr, /evaluation=.*pm-arena-text-overall-sept-2026-v1/);
@@ -40,6 +40,8 @@ test("compiled CLI retrieves evidence, passes requirements to Ollama and evaluat
     assert.equal(run.sources.length, 1);
     assert.equal(run.ledger.calls[0].model, "qwen3.8:27b");
     assert.equal(run.ledger.spentUsd, 0);
+    assert.match(run.event.clarification, /Temporary legal measures/);
+    assert.match(JSON.stringify(run.promptMessages), /Temporary legal measures/);
   } finally {
     await rm(output, { recursive: true, force: true });
   }

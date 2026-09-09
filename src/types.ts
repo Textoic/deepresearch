@@ -54,6 +54,7 @@ export interface MarketOutcome {
 }
 
 export interface PolymarketMarket {
+  createdAt?: string;
   id: string;
   question?: string;
   slug?: string;
@@ -68,6 +69,7 @@ export interface PolymarketMarket {
 }
 
 export interface PolymarketEvent {
+  clarification?: string;
   id: string;
   slug: string;
   title: string;
@@ -162,6 +164,7 @@ export interface ResearchDossier {
 }
 
 export interface ResearchMarketRequest {
+  clarification?: string;
   slug: string;
   asOf?: Date;
   budgetUsd: number;

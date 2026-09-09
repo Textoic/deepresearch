@@ -6,6 +6,7 @@ import { candidateUnit, dependencyQueries, discoveryQueries, namedUnit, parseUni
 import { auditMessages, discoveryMessages, dossierMessages, renderSources, type Lead } from "./decomposition-prompts.ts";
 import { DecompositionSession, DISCOVERY_TOKENS, DOSSIER_TOKENS, TruncatedOutputError, type Decomposition, type DecompositionOptions } from "./decomposition-session.ts";
 import { OPERATIONAL_PREFIX } from "./run-assembly.ts";
+import { prioritySources, uniqueSources } from "./research-source-selection.ts";
 import type { ChatMessage, PolymarketMarket, ResearchDossier, ResearchUnit } from "./types.ts";
 
 export type { DecompositionOptions };
@@ -150,6 +151,7 @@ class MarketDecomposer extends DecompositionSession {
     const context: UnitContext = { numbers: [], promptMessages: [] };
     try {
       context.numbers = [...new Set(this.accept(await this.search(unit.queries)))];
+      context.numbers = this.withPrioritySources(context.numbers);
       const structuredContext = unit.kind === "race" ? await this.raceContext(unit, context.numbers) : "";
       context.promptMessages = dossierMessages({ asOf: this.asOf, event: this.event, unit, structuredContext, evidence: this.evidenceFor(context.numbers, unit.name) });
       this.recordDossier(unit, await this.call(`dossier:${unit.name}`, context.promptMessages, DOSSIER_TOKENS), context, "complete");
@@ -157,6 +159,11 @@ class MarketDecomposer extends DecompositionSession {
     } catch (error) {
       return this.recordFailure(unit, error, context);
     }
+  }
+
+  private withPrioritySources(numbers: number[]): number[] {
+    const searched = numbers.map(number => ({ number, source: this.sources[number - 1]! }));
+    return uniqueSources([...prioritySources(this.sources, this.event), ...searched], 10).map(entry => entry.number);
   }
 
   private isLastListedCandidate(unit: ResearchUnit): boolean {

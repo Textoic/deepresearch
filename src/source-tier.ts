@@ -14,6 +14,7 @@ export const PROVENANCE_POLICY = `SOURCE PROVENANCE: every source carries a prov
 const OFFICIAL_SUFFIXES = [".gov", ".mil", ".int", ".gov.uk", ".gc.ca", ".gov.au", ".govt.nz", ".europa.eu"];
 
 const OFFICIAL_HOSTS = new Set([
+  "mapn.ro", "presidencia.gob.ve", "en.mfa.gov.ir", "commonslibrary.parliament.uk",
   "un.org", "imf.org", "worldbank.org", "oecd.org", "who.int", "wto.org", "iaea.org", "nato.int",
   "arxiv.org", "ssrn.com", "doi.org", "nature.com", "science.org", "pnas.org", "thelancet.com",
   "courtlistener.com", "supremecourt.gov", "federalregister.gov", "sec.gov", "eur-lex.europa.eu",

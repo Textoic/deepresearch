@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 
-export const USAGE = "Usage: budget-research market <slug> --provider ollama|openrouter --model <model> --budget <usd> [--ollama-url <url>] [--searxng-url <url>] [--search serxng|serper|serper-then-searxng] [--serper-key <key>] [--eval-file <json> --eval-case <id>] [--as-of <date>] [--source <url>] [--query <query>] [--max-output-tokens <count>] [--effort low|medium|high] [--evidence-policy disclose|strict] [--replay-run <directory>] [--out <dir>]";
+export const USAGE = "Usage: budget-research market <slug> --provider ollama|openrouter --model <model> --budget <usd> [--clarification <text> | --clarification-file <path>] [--ollama-url <url>] [--searxng-url <url>] [--search searxng|serper|serper-then-searxng] [--serper-key <key>] [--eval-file <json> --eval-case <id>] [--as-of <date>] [--source <url>] [--query <query>] [--max-output-tokens <count>] [--effort low|medium|high] [--evidence-policy disclose|strict] [--replay-run <directory>] [--out <dir>]";
 
 const OPTIONS = {
   help: { type: "boolean", short: "h" },
@@ -15,6 +15,7 @@ const OPTIONS = {
   "evidence-policy": { type: "string" },
   "max-output-tokens": { type: "string" },
   "replay-run": { type: "string" },
+  clarification: { type: "string" }, "clarification-file": { type: "string" },
 } as const;
 
 const PROVIDERS = ["ollama", "openrouter"] as const;
@@ -61,12 +62,17 @@ function requireEvalPair(values: { "eval-file"?: string; "eval-case"?: string })
   if (values["eval-case"] && !values["eval-file"]) throw new Error("--eval-case requires --eval-file.");
 }
 
+function requireClarificationChoice(values: { clarification?: string; "clarification-file"?: string }): void {
+  if (values.clarification !== undefined && values["clarification-file"] !== undefined) throw new Error("Use only one of --clarification and --clarification-file.");
+}
+
 export function parseCliArgs(argv: string[]) {
   const args = argv[0] === "--" ? argv.slice(1) : argv;
   const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options: OPTIONS });
   if (values.help) return { help: true as const };
   const slug = requireMarketSlug(positionals);
   requireEvalPair(values);
+  requireClarificationChoice(values);
   return { help: false as const, slug,
     provider: oneOf(PROVIDERS, values.provider, undefined, "--provider must be ollama or openrouter."),
     model: requireModel(values.model),
@@ -80,5 +86,6 @@ export function parseCliArgs(argv: string[]) {
     ollamaUrl: values["ollama-url"], searxngUrl: values["searxng-url"],
     evalFile: values["eval-file"], evalCase: values["eval-case"], apiKey: values["api-key"],
     sources: values.source ?? [], queries: values.query, replayRun: values["replay-run"],
+    clarification: values.clarification, clarificationFile: values["clarification-file"],
     out: values.out ?? "runs" } as const;
 }

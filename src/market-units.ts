@@ -1,4 +1,5 @@
 import { candidateName } from "./market-policy.ts";
+import { resolutionQueries, resolutionUnits } from "./resolution-research.ts";
 import type { PolymarketEvent, ResearchRun, ResearchUnit, SearchProvider, SourceDocument } from "./types.ts";
 
 const CLASS_II_2026 = "Alabama,Alaska,Arkansas,Colorado,Delaware,Georgia,Idaho,Illinois,Iowa,Kansas,Kentucky,Louisiana,Maine,Massachusetts,Michigan,Minnesota,Mississippi,Montana,Nebraska,New Hampshire,New Jersey,New Mexico,North Carolina,Oklahoma,Oregon,Rhode Island,South Carolina,South Dakota,Tennessee,Texas,Virginia,West Virginia,Wyoming".split(",");
@@ -33,6 +34,8 @@ export function candidateUnit(event: PolymarketEvent, name: string, unlisted: bo
 }
 
 export function initialUnits(event: PolymarketEvent): ResearchUnit[] {
+  const resolution = resolutionUnits(event);
+  if (resolution) return resolution;
   if (isSenateControlEvent(event)) return [...CLASS_II_2026.map(name => `${name} regular`), ...SPECIAL_ELECTIONS_2026].map(raceUnit);
   const candidates = [...new Set((event.markets ?? []).map(candidateName).filter(name => name && !PLACEHOLDER_CANDIDATE.test(name)))];
   return candidates.length > 1 ? candidates.map(name => candidateUnit(event, name, false)) : [];
@@ -58,6 +61,8 @@ function candidateDiscovery(title: string): string[] {
 }
 
 export function discoveryQueries(event: PolymarketEvent): string[] {
+  const resolution = resolutionQueries(event);
+  if (resolution) return resolution;
   if (/senate/i.test(event.title) && /2026/.test(event.title)) return SENATE_DISCOVERY;
   if (initialUnits(event).some(unit => unit.kind === "candidate")) return candidateDiscovery(event.title);
   if (/\bAGI\b/.test(event.title)) return AGI_DISCOVERY;

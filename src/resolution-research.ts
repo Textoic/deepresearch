@@ -1,0 +1,34 @@
+import type { PolymarketEvent, ResearchUnit } from "./types.ts";
+
+interface ResearchProfile { slug: string; units: Array<[string, string, string[]]>; }
+
+const PROFILES: ResearchProfile[] = [
+  { slug: "venezuela-leader-end-of-2026", units: [
+    ["Formal presidency and temporary powers", "Verify formal appointment, removal, replacement and effective dates. Apply the supplied clarification: temporary exercise of powers alone does not transfer the presidency. Distinguish Maduro's custody from his formal title and Rodriguez's exercised authority. Seek current official government acts, not assumptions from news labels.", ["Venezuela Maduro Delcy Rodriguez temporary absence president decree Supreme Court 2026", "site:presidencia.gob.ve Maduro presidente Delcy septiembre 2026"]],
+    ["Succession and resolution fallback", "Investigate formal succession paths through December 31, 2026 at noon ET, primary-status and first-assumption tie breaks, no-holder outcome and conditional UN fallback. Date the UN listing; it does not automatically override clear government information. No Head of State requires no individual to hold the position, not merely unclear evidence or an unavailable UN listing. Assess evidence for alternative holders without candidate odds.", ["site:un.org protocol heads state Venezuela Maduro Rodriguez 2026", "Venezuela constitution articles 233 234 temporary absolute absence president 2026"]],
+  ] },
+  { slug: "nato-x-russia-military-clash-in-2025", units: [
+    ["Romanian maritime drone evidence", "Assess the August 20 incident using the supplied clarifications and Romanian releases 6845 and 6846. Separately establish date/year, Russian military attribution, munition versus reusable UAV, and intended target. An explosive munition with no established Romanian target does not establish a qualifying clash. Do not infer event year from the slug or announcement scheduling notice.", ["site:english.mapn.ro 6845 press information maritime drone", "site:english.mapn.ro 6846 updated press information"]],
+    ["Qualifying encounters and exclusions", "Map dated incidents to each open contract's actual start and end, not the stale 2025 event summary. A Russian munition targeting NATO territory or forces is not excluded by the third-party-target interception exception; non-munition UAV shootdowns need not target NATO territory. Unknown intended target does not establish either target. Distinguish weapons use from warning shots, airspace violations and physical collisions; verify direct command for contractors. NATO war or Article 5 is not required. Research confirming and disconfirming evidence.", ["NATO Russia military encounter drone shot down September 2026 Romania Poland", "NATO Russia drone munition third party target interception August 20 2026 Romania"]],
+  ] },
+  { slug: "maduro-prison-time-527", units: [
+    ["Case schedule and first sentencing", "Find the dated docket, trial setting, motion deadlines, continuances and possible plea route in the named SDNY case. Separate custody, indictment, conviction and first sentencing. Compare feasible trial-to-sentence and plea-to-sentence paths against December 31, 2027 at 11:59 PM ET; no trial date is not evidence of no sentencing by then. Do not invent procedural deadlines.", ["Maduro SDNY September 2026 trial date docket sentencing plea", "site:justice.gov Maduro 2026 indictment court proceedings"]],
+    ["Sentence brackets and no-prison paths", "Apply first sentence regardless of appeal; acquittal, mistrial, first sentence without prison and no sentencing by cutoff each lead to No Prison Time. Pretrial detention is not the imposed term. Verify charges, statutory exposure, plea incentives and relevant comparators without assuming statutory maximum equals sentence. Life maps to highest bracket and exact boundaries to the higher bracket.", ["Maduro trial 2026 2027 plea sentencing charges mandatory minimum", "site:justice.gov Maduro Flores indictment narco terrorism sentencing"]],
+  ] },
+  { slug: "us-strike-on-cuba-by", units: [
+    ["Minimum qualifying military action", "Research limited aerial, drone or missile action, including FPV/ATGM and intelligence or other US government operatives, rather than requiring invasion or war. Map territorial ground impact, rivers/lakes/ports versus territorial sea; exclude interception, surface-to-air missiles, artillery, small arms, incursions, naval shelling and cyberattacks. Address the US/Trump claim clause and two-day confirmation window without extending the strike deadline.", ["US Cuba military strike drone missile September 2026 official statement", "site:southcom.mil Cuba 2026 operations"]],
+    ["Escalation triggers and restraint", "Find dated deployments, authorization signals, diplomatic talks and possible triggers for limited action; separately assess deterrents and de-escalation. Threats and capability alone do not establish an attack. Analyze each open deadline, distinguish absence of reporting from low event risk, and avoid target prices.", ["US Cuba September 2026 military threats talks Reuters", "site:whitehouse.gov Cuba 2026 military"]],
+  ] },
+  { slug: "us-iran-final-nuclear-deal-by-20260621201254412", units: [
+    ["Written instrument and mutual adoption", "Seek the June 14, 2026 memorandum and later proposed or adopted texts. Check mutual signature or qualifying signature-free formal adoption of the same instrument, identification as the contemplated final deal, and at least one measurable unconditional nuclear restriction. One restriction can suffice: comprehensive settlement, ratification, entry into force and implementation are not required. Monitoring alone, vague pledges and conditions awaiting future agreement do not qualify.", ["US Iran June 14 2026 memorandum final deal text nuclear", "US Iran September 2026 final nuclear agreement signed adopted enrichment stockpile"]],
+    ["Negotiation timeline and unresolved obligations", "Verify current progress, both governments' confirmations, specific remaining disagreements and paths to a limited qualifying instrument by each open deadline. Separate fixed obligations with later technical arrangements from substantively conditional obligations. The up-to-28-day text-release period is not extra time to adopt; later repudiation does not undo an already qualifying instrument.", ["Iran United States nuclear talks August September 2026 agreement latest -site:polymarket.com", "US Iran August 2026 60 day deadline final deal talks Pakistan"]],
+  ] },
+];
+
+export function resolutionUnits(event: PolymarketEvent): ResearchUnit[] | undefined {
+  return PROFILES.find(profile => profile.slug === event.slug)?.units.map(([name, question, queries]) => ({ name, question, queries, kind: "dependency" }));
+}
+
+export function resolutionQueries(event: PolymarketEvent): string[] | undefined {
+  return resolutionUnits(event)?.flatMap(unit => unit.queries);
+}

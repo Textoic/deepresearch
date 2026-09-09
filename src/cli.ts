@@ -55,11 +55,12 @@ function createSearchProvider(flags: Flags): SearchProvider | undefined {
   return new FallbackSearchProvider([{ id: "serper", provider: serper }, { id: "searxng", provider: searxng }]);
 }
 
-function buildRequest(flags: Flags, evaluationCase: EvaluationCase | undefined, sources: SourceDocument[]) {
-  return { slug: flags.slug, budgetUsd: flags.budgetUsd, asOf: flags.asOf, sources, queries: flags.queries, effort: flags.effort, evidencePolicy: flags.evidencePolicy, maxOutputTokens: flags.maxOutputTokens, requirements: evaluationCase?.mustCover.map((criterion) => criterion.assertion) };
+async function buildRequest(flags: Flags, evaluationCase: EvaluationCase | undefined, sources: SourceDocument[]) {
+  const clarification = flags.clarificationFile ? await readFile(flags.clarificationFile, "utf8") : flags.clarification;
+  return { slug: flags.slug, clarification, budgetUsd: flags.budgetUsd, asOf: flags.asOf, sources, queries: flags.queries, effort: flags.effort, evidencePolicy: flags.evidencePolicy, maxOutputTokens: flags.maxOutputTokens, requirements: evaluationCase?.mustCover.map((criterion) => criterion.assertion) };
 }
 
-async function executeRun(client: ResearchClient, flags: Flags, request: ReturnType<typeof buildRequest>): Promise<ResearchRun> {
+async function executeRun(client: ResearchClient, flags: Flags, request: Awaited<ReturnType<typeof buildRequest>>): Promise<ResearchRun> {
   if (!flags.replayRun) return client.researchMarket(request);
   const saved = JSON.parse(await readFile(join(flags.replayRun, "run.json"), "utf8")) as ResearchRun;
   return client.rewriteRun(saved, request);
@@ -92,7 +93,7 @@ async function main() {
   const searchProvider = createSearchProvider(flags);
   const client = new ResearchClient({ provider: createProvider(flags), searchProvider, store: new FileRunStore(flags.out) });
   console.error(`Researching with ${flags.model}; up to ${flags.maxOutputTokens} output tokens. Local generation may take several minutes.`);
-  const run = await executeRun(client, flags, buildRequest(flags, evaluationCase, sources));
+  const run = await executeRun(client, flags, await buildRequest(flags, evaluationCase, sources));
   reportRun(run);
   if (evaluationCase) await writeEvaluation(flags.out, run, evaluationCase);
 }

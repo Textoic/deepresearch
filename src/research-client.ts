@@ -2,6 +2,7 @@ import { selectEvidence, type EvidencePolicy } from "./evidence.ts";
 import { citationIntegrityLimitation, linkSourceReferences, unfoundedCitations } from "./citations.ts";
 import { renderSenateReport } from "./senate-report.ts";
 import { normalizeMarketEvent } from "./market-policy.ts";
+import { clarificationAdapters } from "./clarification-adapter.ts";
 import { decomposeMarket } from "./market-decomposition.ts";
 import { discoveryQueries } from "./market-units.ts";
 import { collectAdapterSources, extractSourceUrls, type SourceAdapter } from "./source-adapters.ts";
@@ -59,13 +60,14 @@ export class ResearchClient {
 
   async rewriteRun(previous: ResearchRun, request: ResearchMarketRequest): Promise<ResearchRun> {
     if (!previous.event || previous.event.slug !== request.slug) throw new Error("Replay snapshot does not match the requested market.");
-    return this.runResearch(previous.event, { ...request, asOf: new Date(previous.asOf), sources: previous.sources }, { parentRunId: previous.id, previousDecomposition: previous.decomposition });
+    const changed = request.clarification !== undefined && request.clarification !== previous.event.clarification;
+    return this.runResearch(previous.event, { ...request, asOf: new Date(previous.asOf), sources: previous.sources }, { parentRunId: previous.id, previousDecomposition: changed ? undefined : previous.decomposition });
   }
 
   private async gatherEvidence(event: PolymarketEvent, request: ResearchMarketRequest, state: { asOf: string; policy: EvidencePolicy; canResearch: boolean; skipRetrieval: boolean; topicMode: boolean }): Promise<EvidenceBundle> {
     const live = state.canResearch && !state.skipRetrieval;
     const rules = resolutionRules(event);
-    const adapted = live ? await collectAdapterSources(this.options.sourceAdapters ?? [], { topic: event.title, rules, urls: extractSourceUrls(rules), asOf: state.asOf, signal: AbortSignal.timeout(RETRIEVAL_TIMEOUT_MS) }) : { documents: [], diagnostics: [] };
+    const adapted = live ? await collectAdapterSources([...clarificationAdapters(event.clarification), ...this.options.sourceAdapters ?? []], { topic: event.title, rules, urls: extractSourceUrls(rules), asOf: state.asOf, signal: AbortSignal.timeout(RETRIEVAL_TIMEOUT_MS) }) : { documents: [], diagnostics: [] };
     const retrieved = live ? await this.retrieveEventSources(event, request, state.topicMode) : { sources: [], searches: [] };
     const selection = selectEvidence([...(request.sources ?? []), ...adapted.documents, ...retrieved.sources], state.asOf, state.policy);
     const limitations = [
@@ -156,7 +158,7 @@ export class ResearchClient {
 
   private async runResearch(original: PolymarketEvent, request: ResearchMarketRequest, options: RunOptions = {}): Promise<ResearchRun> {
     const topicMode = options.topicMode ?? false;
-    const event = topicMode ? original : normalizeMarketEvent(original);
+    const event = topicMode ? original : normalizeMarketEvent({ ...original, clarification: request.clarification ?? original.clarification });
     const asOf = (request.asOf ?? new Date()).toISOString();
     const guard = new BudgetGuard(request.budgetUsd);
     const policy = validatedPolicy(request);

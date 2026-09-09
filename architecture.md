@@ -77,6 +77,15 @@ Every module is pure except the adapters (`providers/`, `search/`, `storage/`,
 
 ### Which sources the synthesis writer sees
 
+- The resolution batch exposed a further selection failure: Cuba's September 7 report of
+  stalled talks was retrieved but displaced by older official pages, so synthesis described
+  talks as progressing. `prioritySources` reserves space for supplied clarification links
+  and up to three newest dated tier-1/2 sources whose titles mention the subject. Remaining
+  synthesis slots retain provenance ordering; the ten-source and excerpt budgets do not grow.
+  Components also receive these sources from the shared evidence pool, capped at ten sources,
+  so initial retrieval evidence is not lost when a component's own searches miss it. This
+  title-based freshness heuristic is a coverage safeguard, not semantic relevance validation.
+
 - `synthesisSources` used to take the first six sources by retrieval order. In the
   press-secretary run those six were the first search's aggregator hits, so the synthesis
   never saw `whitehouse.gov` or Axios at all. It now ranks by provenance (tier, then
@@ -114,6 +123,53 @@ Every module is pure except the adapters (`providers/`, `search/`, `storage/`,
   recorded and made visible rather than clamped.
 
 ### Market policy
+
+- `ResearchMarketRequest.clarification` is optional caller-supplied text. The CLI accepts
+  `--clarification` or UTF-8 `--clarification-file` (mutually exclusive). The event snapshot
+  stores it separately from Gamma `raw`; discovery, component and synthesis contexts retain
+  the full text and supplied order. Dates and authenticity are unverified, explicitly
+  disclosed, and must not be inferred for historical replay. An omitted replay value keeps
+  the saved clarification; a changed value drops stale component reports and rewrites from
+  saved evidence. An empty string explicitly clears it.
+- `marketContext` deduplicates complete rule texts and associates each eligible contract
+  with a `ruleIndex`; this preserves distinct deadlines without repeating identical rules
+  for every outcome and overrunning the model context. Component writers now receive this
+  same contract context instead of only the event title.
+- `PolymarketMarket.createdAt` is optional and included in contract context for windows
+  beginning at market creation; explicit rule dates still take precedence over API dates.
+- `RESOLUTION_POLICY` requires necessary conditions, exclusions, source hierarchy, occurrence
+  windows and reporting grace periods. It distinguishes formal status from practical power
+  and minimum qualifying acts from more demanding real-world endpoints.
+- `resolution-research.ts` contains evidence-seeking checklists for the five supplied
+  failure cases. These are questions, not asserted current facts or forecast targets. They
+  seed two dependency dossiers and four queries per event, avoiding the generic candidate
+  workflow for sentence ranges and date labels. Open nested contracts control their own
+  timeframes even when the event slug or description retains an expired year.
+- The supplied Maduro and four-paragraph NATO clarifications are regression fixtures.
+  `reviews/run-resolution-2026-09-08.mjs` generates a reproducible five-market review batch
+  with saved evidence, prompts and model calls. Agreement with target prices is not a
+  quality criterion; checklist coverage and source support require human review.
+- Clarification URLs are fetched directly (up to eight) by `clarification-adapter.ts`,
+  because searching the exact Romanian release IDs returned an unrelated ministry page.
+  Retrieval failures remain adapter diagnostics; blank fallbacks are not evidence. Eligible
+  linked pages reach every component with global source numbers and survive in the snapshot;
+  replay performs no link fetch. `mapn.ro`, `presidencia.gob.ve`, `en.mfa.gov.ir` and `commonslibrary.parliament.uk` are
+  explicitly classified as official hosts.
+- The resolution checklist also reaches synthesis directly: a component may invert a
+  conditional exception, so its paraphrase must not displace the original criteria. The
+  first NATO draft incorrectly excluded all munitions and invented a 2025 incident year;
+  direct releases date the incident August 20, 2026. Unknown intended target is not proof
+  of a third-party target. Older evidence cannot establish current absence of a legal act.
+- Iran's official-site-only timeline searches returned old treaty material. Its timeline
+  queries now include the elapsed negotiating window and recent broader reporting. The
+  reviewed contexts in `reviews/resolution-contexts-2026-09-08/` include separately checked
+  August evidence; raw generated reports remain distinct from those edited research contexts.
+- CLI example: `npm start -- market venezuela-leader-end-of-2026 --provider ollama --model qwen3.8:27b --budget 0 --searxng-url http://127.0.0.1:8080 --effort high --clarification-file reviews/resolution-contexts-2026-09-08/venezuela-clarification.txt`.
+- The live regenerated NATO report uses the 2026 incident date and Cuba synthesis includes
+  September 7 diplomacy evidence. Two regenerated reports retain citation-integrity flags
+  and are `partial`; a clean generation stop is not semantic validation. The edited contexts
+  correct identified interpretation errors without overwriting raw output. No downstream
+  forecaster or probability-calibration benchmark was run.
 
 - Raw prices and excluded markets stay in the audit snapshot only, never in writer
   metadata. Target-market URLs contribute frozen, price-free resolution metadata.

@@ -4,6 +4,7 @@ import { renderDossiers, synthesisContext } from "./decomposition-render.ts";
 import { renderSenateEvidence } from "./senate-report.ts";
 import { sectionContract, selectExcerpt, type NumberedSource } from "./report-prompt.ts";
 import { byProvenance } from "./source-tier.ts";
+import { prioritySources, uniqueSources } from "./research-source-selection.ts";
 import type { EvidencePolicy } from "./evidence.ts";
 import type { ChatMessage, PolymarketEvent, ResearchMarketRequest, ResearchRun, SourceDocument } from "./types.ts";
 
@@ -29,7 +30,7 @@ export function validatedPolicy(request: ResearchMarketRequest): EvidencePolicy 
 }
 
 export function resolutionRules(event: PolymarketEvent): string {
-  return [event.resolutionSource, event.description, ...(event.markets ?? []).map(market => market.description)].filter(Boolean).join("\n");
+  return [event.resolutionSource, event.description, event.clarification, ...(event.markets ?? []).map(market => market.description)].filter(Boolean).join("\n");
 }
 
 function withdrawFutureBoard(snapshot: ReturnType<typeof extractArenaSnapshot>, asOf: string): void {
@@ -94,9 +95,8 @@ export function synthesisSources(sources: SourceDocument[], decomposition: Resea
   const numbered: NumberedSource[] = sources.map((source, index) => ({ number: index + 1, source }));
   if (!decomposition?.dossiers.length) return numbered;
   const terms = synthesisTerms(event);
-  return [...numbered]
-    .sort((a, b) => byProvenance(a.source, b.source) || a.number - b.number)
-    .slice(0, SYNTHESIS_SOURCES)
+  const ranked = [...numbered].sort((a, b) => byProvenance(a.source, b.source) || a.number - b.number);
+  return uniqueSources([...prioritySources(sources, event), ...ranked], SYNTHESIS_SOURCES)
     .sort((a, b) => a.number - b.number)
     .map(entry => ({ number: entry.number, source: { ...entry.source, text: selectExcerpt(entry.source.text, SYNTHESIS_EXCERPT_CHARACTERS, terms) } }));
 }
