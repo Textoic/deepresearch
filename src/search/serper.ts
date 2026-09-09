@@ -1,4 +1,5 @@
 import { deadline, PageContentFetcher, validWebUrl, type SearchHit } from "./page-content.ts";
+import { excludedFromRetrieval } from "./excluded-hosts.ts";
 import type { SearchProvider, SourceDocument } from "../types.ts";
 
 interface SerperOrganic { title?: string; link?: string; snippet?: string; date?: string; }
@@ -58,7 +59,7 @@ export class SerperSearchProvider implements SearchProvider {
 
   async search(query: string, options: { limit: number; signal?: AbortSignal }): Promise<SourceDocument[]> {
     const organic = await this.query(query, options.limit, options.signal);
-    const results = organic.slice(0, options.limit).filter((result) => validWebUrl(result.link));
+    const results = organic.filter((result) => validWebUrl(result.link) && !excludedFromRetrieval(result.link!)).slice(0, options.limit);
     return Promise.all(results.map((result) => this.pages.toSource(toHit(result), options.signal)));
   }
 

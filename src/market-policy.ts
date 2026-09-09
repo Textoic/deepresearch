@@ -1,3 +1,4 @@
+import { isPredictionMarketHost } from "./search/excluded-hosts.ts";
 import type { PolymarketEvent, PolymarketMarket, SourceDocument } from "./types.ts";
 
 export const MARKET_RESEARCH_POLICY = `ANTI-ANCHORING POLICY: Exclude ALL prediction-market and expert odds, probabilities, price movements, favorites, rankings and forecasts of the TARGET event, including its named candidate outcomes. Do not quote, summarize, use as a baseline, or reverse-engineer these forecasts. This applies even if they occur in retrieved text. Do not produce a target-event probability yourself: this report supplies evidence for a subsequent independent forecast.
@@ -27,7 +28,6 @@ export function candidateName(m: PolymarketMarket): string {
   return m.groupItemTitle?.trim() || m.question?.match(/^Will (.+?) (?:be|become) (?:the )?next /i)?.[1]?.trim() || "";
 }
 
-const MARKET_SITE = /(?:^|\.)(?:polymarket\.com|polymarket\.us|kalshi\.com|polymarketanalytics\.com|polyrama\.io)$/;
 const FROZEN_DEPENDENCY_QUOTE = /^https:\/\/gamma-api\.polymarket\.com\/events\?slug=/;
 const SENTENCE_BOUNDARY = /(?<=[.!?])\s+|\n+/;
 const FORECAST = /\b(?:odds|probabilit\w*|chance\w*|predict\w*|forecast\w*|favorite\w*|favourite\w*|betting|priced?|percent)\b|\d\s*%/i;
@@ -73,7 +73,7 @@ function isTargetMarketUrl(url: string, slug: string): boolean {
 
 export function evidenceForWriter(source: SourceDocument, event: PolymarketEvent): SourceDocument {
   if (isFrozenDependencyQuote(source, event)) return source;
-  if (MARKET_SITE.test(new URL(source.url).hostname)) return { ...source, title: "Prediction-market page withheld", text: WITHHELD_MARKET_TEXT };
+  if (isPredictionMarketHost(source.url)) return { ...source, title: "Prediction-market page withheld", text: WITHHELD_MARKET_TEXT };
   if (isTargetMarketUrl(source.url, event.slug)) return { ...source, title: "Target market: pricing withheld", text: WITHHELD_FORECAST_TEXT };
   const text = source.text.split(SENTENCE_BOUNDARY).filter((sentence) => !leaksTargetForecast(sentence, source, event)).join("\n");
   return { ...source, text: text || WITHHELD_FORECAST_TEXT };

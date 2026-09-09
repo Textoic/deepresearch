@@ -95,6 +95,12 @@ Every module is pure except the adapters (`providers/`, `search/`, `storage/`,
   `index + 1`. Dossier citations and writer citations therefore stay on one numbering.
 - Synthesis excerpt terms come from the event title. They were previously a fixed
   Senate-specific word list applied to every market.
+- `selectExcerpt` selects whole passages — paragraphs, or sentences within one — instead of
+  650-character chunks. Fixed chunks cut mid-word and mid-sentence, and joined the pieces
+  with a 20-character `[... excerpt ...]` banner repeated for every gap, which cost tokens
+  and read as noise. Non-adjacent passages are now joined by `[…]`. The marker is not
+  dropped altogether: splicing passages from different dates into apparently continuous
+  prose is precisely the misreading the resolved-claim cross-check exists to catch.
 - Ten is close to the ceiling, not a free parameter. `maxInputTokens` is declarative:
   `OllamaProvider` never sends it and pins `num_ctx` to 32768, which input **and** output
   share. The 2026-09-07 Senate synthesis already used 22 280 input tokens against an 8 192
@@ -225,7 +231,8 @@ Every module is pure except the adapters (`providers/`, `search/`, `storage/`,
 ### Search providers and their fallbacks
 
 - `page-content.ts` owns everything after a result URL is known: page fetch, challenge
-  detection, HTML stripping, publication date, tier classification. `SearxngSearchProvider`
+  detection, text extraction and its readability gate (`html-text.ts`), publication date,
+  tier classification. `SearxngSearchProvider`
   and `SerperSearchProvider` only translate their own response shape into `SearchHit`, so
   both get identical evidence handling.
 - An empty SearXNG result set is retried (`EMPTY_RETRY_DELAYS_MS`) **only when
@@ -241,6 +248,72 @@ Every module is pure except the adapters (`providers/`, `search/`, `storage/`,
   — `new Date("Sep 3, 2026").toISOString()` yields the 2nd in any timezone east of UTC.
 - Serper bills 1 credit for up to 10 results and 2 credits for 11-100, so `billedResults`
   never asks for 11-100 when the caller wanted 10 or fewer.
+
+### Reading a page into prose
+
+- `html-text.ts` replaces a two-regex `stripHtml`. That function truncated the response to
+  one megabyte **before** removing `<script>` and `<style>`, so on any page larger than the
+  cap the closing tag fell outside the slice, the non-greedy match never fired, and the
+  whole CSS or JSON bundle was handed to the writer as evidence. A 2026-09-09 CNN fetch
+  produced 387 000 characters of stylesheet; the same page now yields 3 800 characters of
+  article text. YouTube leaked `ytInitialData` the same way.
+- Tag removal is a single-pass scanner, not a regex. `<[^>]+>` ends a tag at the first `>`
+  it sees, including one inside a quoted attribute value: Wikipedia stores wikitext in
+  `data-mw='{"parts":[...]}'`, so the tail of that JSON escaped into the body text and its
+  code-artifact density (6.6 per 1000 characters) was high enough to look like prose. The
+  scanner tracks quote state, so an attribute can contain anything.
+- The scanner drops the *content* of `script`, `style`, `noscript`, `svg`, `template` and
+  `math` to end-of-input when the closing tag is missing, because a truncated code element
+  never contains prose. Layout elements (`nav`, `form`, `footer`, `aside`, `head`, …) are
+  dropped only when their closing tag exists: an unterminated `<form>` on
+  `whitehouse.gov` would otherwise erase every remaining paragraph on the page.
+- Boilerplate is filtered per line: a line survives if it has at least eight words and
+  either ends a sentence or is majority lowercase-initial. Navigation soup ("Saudi Arabia
+  News The Place The Space Who's Who KSA Today …") is title-case and punctuation-free, so
+  it goes; article sentences stay. The filter is skipped entirely below
+  `SMALL_DOCUMENT_CHARACTERS`, because a small document has no chrome to remove and the
+  filter would eat the whole of a genuinely short page.
+- `isReadableProse` gates what may become a `page` source, and it separates *garbage* from
+  *short*. It rejects empty text and text whose code-artifact density exceeds
+  `MAX_CODE_ARTIFACTS_PER_1000`, always. It applies a minimum length **only** to documents
+  over `LARGE_DOCUMENT_CHARACTERS`: 88 KB of arabnews.com HTML yielding 129 characters is a
+  failed extraction of a client-rendered page, while 1.5 KB yielding 129 characters is a
+  short official notice and load-bearing evidence. A rejected page falls back to its
+  discovery snippet, which is short, clean and already labelled as an unverified clue.
+
+### Prediction-market sources are never retrieved
+
+- `excluded-hosts.ts` holds one list of prediction-market and odds-tracker hosts, and both
+  search providers drop those hits *before* fetching, filtering ahead of the result slice
+  so an excluded hit does not consume one of the caller's `limit` slots. Previously such a
+  page was fetched, tiered, numbered and only then blanked by `evidenceForWriter`, which
+  spent a retrieval and a source slot to deliver the sentence "[Market UI withheld …]" to
+  the writer.
+- `evidenceForWriter` keeps that redaction as a backstop, now over the same shared list, for
+  caller-supplied sources, clarification links and adapter output, none of which pass
+  through a search provider.
+
+### The resolved-claim cross-check
+
+- The AWS run is the failure this exists for: an AWS Health page describing an incident that
+  opened on 20 October 2025 carried no explicit closure metadata, the writer read it as an
+  active event dated 8 September 2026, and the forecaster — reasoning correctly from that
+  evidence — returned 99.99% on a contract trading at 50%.
+- `market-coherence.ts` turns Gamma's `outcomePrices` into a **binary** signal: which open
+  contracts are not priced at a settled level (`SETTLED_PRICE`). The directive names those
+  contracts and instructs the writer to treat evidence that appears to settle one of them as
+  a contradiction to resolve — occurrence date versus retrieval date, live page versus
+  archived record, this contract's window versus an earlier one — and to say which checks
+  the evidence passed.
+- **No number reaches the model.** This is deliberate and is the reason the check is a list
+  of contract names rather than a price. Prices in the writer's context would violate
+  `MARKET_RESEARCH_POLICY`, would risk appearing in the report, and would silently
+  contaminate a caller that runs its forecaster without a market prior: the report is that
+  forecaster's context, so a leaked price is a leaked prior. `market-coherence.test.ts`
+  asserts the writer prompt contains neither a price nor `outcomePrices`.
+- The directive tells the writer to report evidence that survives the checks as it stands.
+  A cross-check that suppressed well-supported evidence would trade a false positive for a
+  false negative, which is not an improvement.
 
 ### A silent retrieval failure must not become a report
 

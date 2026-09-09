@@ -1,3 +1,4 @@
+import { htmlToText, isReadableProse, plainTextToProse } from "./html-text.ts";
 import { classifySourceTier } from "../source-tier.ts";
 import type { SourceDocument } from "../types.ts";
 
@@ -10,7 +11,7 @@ export interface SearchHit {
 }
 
 const PAGE_TIMEOUT_MS = 20000;
-const MAX_RAW_CHARACTERS = 1_000_000;
+const MAX_RAW_CHARACTERS = 8_000_000;
 const MAX_PLAIN_CHARACTERS = 200_000;
 const SHORT_PAGE_CHARACTERS = 120;
 const CHALLENGE = /prove your humanity|verify you are human|access denied|enable javascript and cookies/i;
@@ -30,10 +31,6 @@ export function validWebUrl(value: unknown): value is string {
     const url = new URL(String(value));
     return url.protocol === "https:" || url.protocol === "http:";
   } catch { return false; }
-}
-
-function stripHtml(html: string): string {
-  return html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function isBlocked(text: string, url: string): boolean {
@@ -60,7 +57,8 @@ async function readPageText(response: Response): Promise<{ raw: string; text: st
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.startsWith("text/")) throw new Error(`Unsupported page type: ${contentType}`);
   const raw = (await response.text()).slice(0, MAX_RAW_CHARACTERS);
-  return { raw, text: contentType.includes("text/html") ? stripHtml(raw) : raw.slice(0, MAX_PLAIN_CHARACTERS) };
+  const text = contentType.includes("text/html") ? htmlToText(raw) : plainTextToProse(raw.slice(0, MAX_PLAIN_CHARACTERS));
+  return { raw, text };
 }
 
 function publishedFromPage(raw: string, hit: SearchHit, retrievedAt: string): string | undefined {
@@ -103,6 +101,7 @@ export class PageContentFetcher {
     if (!response.ok) throw new Error(String(response.status));
     const { raw, text } = await readPageText(response);
     if (isBlocked(text, hit.url)) throw new Error("Blocked or empty page; preserving discovery snippet only");
+    if (!isReadableProse(text, raw.length)) throw new Error("Page did not parse into readable prose; preserving discovery snippet only");
     return {
       url: hit.url, title: hit.title, text: text || hit.snippet || "",
       publishedAt: publishedFromPage(raw, hit, retrievedAt),

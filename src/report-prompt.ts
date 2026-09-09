@@ -1,5 +1,6 @@
 import { renderArenaSnapshot } from "./arena.ts";
 import { arenaSupportingText } from "./evidence-brief.ts";
+import { coherenceDirective, unretrievedResolutionSource } from "./market-coherence.ts";
 import { evidenceForWriter, marketContext, MARKET_RESEARCH_POLICY, RESOLUTION_POLICY } from "./market-policy.ts";
 import { provenanceLine, PROVENANCE_POLICY } from "./source-tier.ts";
 import { resolutionUnits } from "./resolution-research.ts";
@@ -19,9 +20,8 @@ export interface PromptRequest {
   topicMode: boolean;
 }
 
-const CHUNK_CHARACTERS = 650;
-const EXCERPT_PREFIX_CHARACTERS = 200;
-const EXCERPT_OVERHEAD_CHARACTERS = 220;
+const PASSAGE_BOUNDARY = /\n{2,}|(?<=[.!?]["')\]]?)\s+(?=[A-Z"'(\[])/;
+const ELISION = "[…] ";
 const ARENA_PER_SOURCE_CHARACTERS = 1200;
 const PLAIN_PER_SOURCE_CHARACTERS = 7000;
 const ARENA_TOTAL_CHARACTERS = 12000;
@@ -36,16 +36,38 @@ const ARENA_INSTRUCTIONS = "The application adds the leaderboard table separatel
 const NO_SOURCES = "No external sources were supplied in this section; separately supplied component dossiers, if present, retain their global source citations.";
 const CLOSING_RULES = "Write every required section, including the last two: budget the length so the closing sections are written in full rather than reached and abandoned. Each fact belongs in exactly one section; never restate a paragraph, or one component's findings, under a second heading. Organise by the question, not by the order in which evidence was gathered, and answer the question rather than listing what was found.";
 
-export function selectExcerpt(text: string, maxCharacters: number, terms: Set<string>): string {
-  if (text.length <= maxCharacters) return text;
-  const chunks = Array.from({ length: Math.ceil(text.length / CHUNK_CHARACTERS) }, (_, index) => {
-    const content = text.slice(index * CHUNK_CHARACTERS, (index + 1) * CHUNK_CHARACTERS);
+interface Passage { index: number; content: string; score: number; }
+
+function passagesOf(text: string, terms: Set<string>): Passage[] {
+  const parts = text.split(PASSAGE_BOUNDARY).map(part => part.trim()).filter(Boolean);
+  return parts.map((content, index) => {
     const lower = content.toLowerCase();
     return { index, content, score: [...terms].filter(term => lower.includes(term)).length };
   });
-  const keep = Math.max(1, Math.floor((maxCharacters - EXCERPT_OVERHEAD_CHARACTERS) / CHUNK_CHARACTERS));
-  const selected = chunks.slice(1).sort((a, b) => b.score - a.score || a.index - b.index).slice(0, keep).sort((a, b) => a.index - b.index);
-  return (text.slice(0, EXCERPT_PREFIX_CHARACTERS) + "\n[... excerpt ...]\n" + selected.map(chunk => chunk.content).join("\n[... excerpt ...]\n")).slice(0, maxCharacters);
+}
+
+function bestPassages(passages: Passage[], maxCharacters: number): Passage[] {
+  const kept: Passage[] = [];
+  let used = 0;
+  for (const passage of [...passages].sort((a, b) => b.score - a.score || a.index - b.index)) {
+    const cost = passage.content.length + ELISION.length;
+    if (used + cost > maxCharacters) continue;
+    kept.push(passage);
+    used += cost;
+  }
+  return kept.sort((a, b) => a.index - b.index);
+}
+
+function joinPassages(kept: Passage[]): string {
+  return kept
+    .map((passage, position) => (position > 0 && passage.index !== kept[position - 1]!.index + 1 ? `${ELISION}${passage.content}` : passage.content))
+    .join("\n");
+}
+
+export function selectExcerpt(text: string, maxCharacters: number, terms: Set<string>): string {
+  if (text.length <= maxCharacters) return text;
+  const kept = bestPassages(passagesOf(text, terms), maxCharacters);
+  return kept.length ? joinPassages(kept).slice(0, maxCharacters) : text.slice(0, maxCharacters);
 }
 
 export function sourceLimitations(event: PolymarketEvent, sources: SourceDocument[], asOf: string, topicMode = false): string[] {
@@ -53,6 +75,8 @@ export function sourceLimitations(event: PolymarketEvent, sources: SourceDocumen
   if (event.clarification) limitations.push("Clarification supplied by the caller; publication dates and authenticity were not independently verified. Its historical availability at the cutoff is unknown.");
   if (!sources.length) limitations.push("No external evidence documents were supplied. Only supplied context is available until a SearchProvider, source adapter, or caller-supplied evidence is configured.");
   if (!topicMode && !event.markets?.length) limitations.push("The event contained no nested market records.");
+  const unread = topicMode ? undefined : unretrievedResolutionSource(event, sources);
+  if (unread) limitations.push(unread);
   limitations.push(`Information cutoff: ${asOf}. Sources published after this cutoff are excluded.`);
   return limitations;
 }
@@ -108,8 +132,9 @@ function renderArenaContext(arenaEvidence: NonNullable<ResearchRun["arenaEvidenc
 
 function systemPrompt(request: PromptRequest): string {
   const arena = request.arenaEvidence ? ARENA_INSTRUCTIONS : "";
+  const coherence = request.topicMode ? undefined : coherenceDirective(request.event);
   const market = request.topicMode ? "" : `\n${MARKET_RESEARCH_POLICY}\n${RESOLUTION_POLICY}`;
-  return `${SYSTEM_PREAMBLE}${NO_PROCESS_TALK}\n${PROVENANCE_POLICY}\n${arena}${market}`;
+  return `${SYSTEM_PREAMBLE}${NO_PROCESS_TALK}\n${PROVENANCE_POLICY}\n${arena}${market}${coherence ? `\n${coherence}` : ""}`;
 }
 
 export function sectionContract(topicMode: boolean): string {

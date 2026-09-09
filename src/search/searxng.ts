@@ -1,4 +1,5 @@
 import { deadline, PageContentFetcher, validWebUrl, type SearchHit } from "./page-content.ts";
+import { excludedFromRetrieval } from "./excluded-hosts.ts";
 import type { SearchProvider, SourceDocument } from "../types.ts";
 
 interface SearxngResult { url?: string; title?: string; content?: string; publishedDate?: string; }
@@ -37,7 +38,7 @@ export class SearxngSearchProvider implements SearchProvider {
 
   async search(query: string, options: { limit: number; signal?: AbortSignal }): Promise<SourceDocument[]> {
     const payload = await this.resilientQuery(query, options.signal);
-    const results = (payload.results ?? []).slice(0, options.limit).filter((result) => validWebUrl(result.url));
+    const results = (payload.results ?? []).filter((result) => validWebUrl(result.url) && !excludedFromRetrieval(result.url!)).slice(0, options.limit);
     return Promise.all(results.map((result) => this.pages.toSource(toHit(result), options.signal)));
   }
 
