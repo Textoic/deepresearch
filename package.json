@@ -1,8 +1,25 @@
 {
-  "name": "budget-researcher",
+  "name": "@textoic/deepresearch",
   "version": "0.1.0",
-  "private": true,
   "description": "Budget-bounded, evidence-led research for Node.js applications.",
+  "keywords": [
+    "research",
+    "llm",
+    "agent",
+    "citations",
+    "searxng",
+    "ollama",
+    "openrouter"
+  ],
+  "homepage": "https://github.com/Textoic/deepresearch#readme",
+  "bugs": {
+    "url": "https://github.com/Textoic/deepresearch/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Textoic/deepresearch.git"
+  },
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": {
@@ -14,7 +31,8 @@
     "budget-research": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.tsbuildinfo"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -32,5 +50,7 @@
     "tsx": "^4.20.0",
     "typescript": "~5.9.3"
   },
-  "license": "MIT"
+  "publishConfig": {
+    "access": "public"
+  }
 }

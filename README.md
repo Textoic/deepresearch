@@ -1,4 +1,4 @@
-# budget-researcher
+# @textoic/deepresearch
 
 ## Prediction-market research without target-odds anchoring
 
@@ -80,7 +80,7 @@ descriptions and deadlines are included when researching a market.
 
 ```ts
 import { ResearchClient, OllamaProvider, SearxngSearchProvider,
-  PythSourceAdapter, PortWatchSourceAdapter } from "budget-researcher";
+  PythSourceAdapter, PortWatchSourceAdapter } from "@textoic/deepresearch";
 
 const client = new ResearchClient({
   provider: new OllamaProvider("your-local-model"),
@@ -210,7 +210,7 @@ pnpm start -- market <slug> --provider ollama --model qwen3.8:27b --budget 0 --s
 Serper returns links and snippets, not page text, so the pipeline still fetches and snapshots pages itself exactly as it does for SearXNG. A full three-market batch is about 170 searches, so roughly $0.17 at the entry price of $1 per 1,000 queries; the free allowance covers about 14 batches. `SERPER_API_KEY` is read from the environment and is never written into run artefacts.
 
 ```ts
-import { FallbackSearchProvider, SearxngSearchProvider, SerperSearchProvider } from "budget-researcher";
+import { FallbackSearchProvider, SearxngSearchProvider, SerperSearchProvider } from "@textoic/deepresearch";
 
 const searchProvider = new FallbackSearchProvider([
   { id: "serper", provider: new SerperSearchProvider({ apiKey: process.env.SERPER_API_KEY!, freshness: "qdr:m" }) },
@@ -219,7 +219,7 @@ const searchProvider = new FallbackSearchProvider([
 ```
 
 ```ts
-import { OllamaProvider, ResearchClient, SearxngSearchProvider } from "budget-researcher";
+import { OllamaProvider, ResearchClient, SearxngSearchProvider } from "@textoic/deepresearch";
 
 const client = new ResearchClient({
   provider: new OllamaProvider("your-local-model"),
@@ -254,7 +254,7 @@ For local inference, use `--provider ollama --model <local-model>`. `--searxng-u
 ## Library use
 
 ```ts
-import { FileRunStore, OpenRouterProvider, ResearchClient } from "budget-researcher";
+import { FileRunStore, OpenRouterProvider, ResearchClient } from "@textoic/deepresearch";
 
 const client = new ResearchClient({
   provider: new OpenRouterProvider("provider/model", process.env.OPENROUTER_API_KEY!),
