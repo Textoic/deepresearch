@@ -26,6 +26,23 @@ test("a lookalike subdomain of an unrelated host does not inherit a newsroom tie
   assert.equal(classifySourceTier("https://notgov.example/story"), 4);
 });
 
+test("subdomains under two-part country domains keep their outlet's tier", () => {
+  assert.equal(classifySourceTier("https://www.bbc.co.uk/sport/football/1"), 2);
+  assert.equal(classifySourceTier("https://sport.bbc.co.uk/x"), 2);
+  assert.equal(classifySourceTier("https://abcnews.go.com/Sports/story"), 2);
+  assert.equal(classifySourceTier("https://example.co.uk/x"), 4);
+});
+
+test("sports leagues, newsrooms and stats sites are classified rather than left unverified", () => {
+  assert.equal(classifySourceTier("https://www.nba.com/game/gsw-vs-den"), 1);
+  assert.equal(classifySourceTier("https://www.premierleague.com/match/1"), 1);
+  assert.equal(classifySourceTier("https://www.espn.com/nba/preview"), 2);
+  assert.equal(classifySourceTier("https://www.hltv.org/matches/1/g2-vs-dendele"), 2);
+  assert.equal(classifySourceTier("https://fbref.com/en/squads/1"), 2);
+  assert.equal(classifySourceTier("https://www.sportskeeda.com/nba/x"), 3);
+  assert.equal(classifySourceTier("https://www.covers.com/nba/picks"), 3);
+});
+
 test("an explicitly assigned tier survives classification", () => {
   assert.equal(tierOf(source("https://patriot.university/x", "", { sourceTier: 1 })), 1);
   assert.equal(tierOf(source("https://patriot.university/x")), 4);

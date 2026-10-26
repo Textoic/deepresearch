@@ -1,6 +1,6 @@
 {
   "name": "@textoic/deepresearch",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Budget-bounded, evidence-led research for Node.js applications.",
   "keywords": [
     "research",

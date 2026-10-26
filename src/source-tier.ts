@@ -1,3 +1,4 @@
+import { SPORTS_DERIVATIVE_HOSTS, SPORTS_NEWSROOM_HOSTS, SPORTS_OFFICIAL_HOSTS } from "./sports-hosts.ts";
 import type { SourceDocument } from "./types.ts";
 
 export type SourceTier = 1 | 2 | 3 | 4;
@@ -19,6 +20,7 @@ const OFFICIAL_HOSTS = new Set([
   "arxiv.org", "ssrn.com", "doi.org", "nature.com", "science.org", "pnas.org", "thelancet.com",
   "courtlistener.com", "supremecourt.gov", "federalregister.gov", "sec.gov", "eur-lex.europa.eu",
   "openai.com", "anthropic.com", "deepmind.google", "ai.meta.com", "mistral.ai", "x.ai",
+  ...SPORTS_OFFICIAL_HOSTS,
 ]);
 
 const NEWSROOM_HOSTS = new Set([
@@ -31,6 +33,7 @@ const NEWSROOM_HOSTS = new Set([
   "businessinsider.com", "wired.com", "theverge.com", "techcrunch.com", "arstechnica.com",
   "aljazeera.com", "dw.com", "lemonde.fr", "spiegel.de", "nikkei.com", "scmp.com", "straitstimes.com",
   "statnews.com", "nj.com", "mlive.com", "baltimoresun.com", "justthenews.com", "washingtontimes.com",
+  ...SPORTS_NEWSROOM_HOSTS,
 ]);
 
 const DERIVATIVE_HOSTS = new Set([
@@ -39,11 +42,12 @@ const DERIVATIVE_HOSTS = new Set([
   "x.com", "twitter.com", "facebook.com", "instagram.com", "threads.net", "bsky.app", "truthsocial.com",
   "reddit.com", "youtube.com", "medium.com", "substack.com", "linkedin.com", "quora.com",
   "mediaite.com", "realclearpolitics.com", "legistorm.com", "newsmax.com", "thedailybeast.com",
+  ...SPORTS_DERIVATIVE_HOSTS,
 ]);
 
-function registrableDomain(hostname: string): string {
+function parentDomains(hostname: string): string[] {
   const labels = hostname.split(".");
-  return labels.length <= 2 ? hostname : labels.slice(-2).join(".");
+  return labels.slice(0, -1).map((_, index) => labels.slice(index).join("."));
 }
 
 function hostnameOf(url: string): string | undefined {
@@ -51,7 +55,7 @@ function hostnameOf(url: string): string | undefined {
 }
 
 function matches(hosts: Set<string>, hostname: string): boolean {
-  return hosts.has(hostname) || hosts.has(registrableDomain(hostname));
+  return parentDomains(hostname).some(domain => hosts.has(domain));
 }
 
 export function classifySourceTier(url: string): SourceTier {

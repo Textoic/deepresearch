@@ -62,8 +62,17 @@ Every module is pure except the adapters (`providers/`, `search/`, `storage/`,
   press-secretary run drew 191 sources from 126 domains, and its core claim rested on a
   content farm; an unknown domain must read as unverified provenance rather than as
   ordinary reporting. Adding a host to a tier is a deliberate act.
-- Host matching checks the exact hostname and its registrable domain, so `uk.reuters.com`
-  is tier 2 while `reuters.com.example.test` is tier 4.
+- Host matching checks the hostname and every parent domain, so `uk.reuters.com` and
+  `sport.bbc.co.uk` keep their outlet's tier while `reuters.com.example.test` is tier 4.
+  It used to check only the last two labels, which turned `sport.bbc.co.uk` into `co.uk`
+  and `sports.abcnews.go.com` into `go.com`, so subdomains under two-part country domains
+  and under listed subdomain outlets fell to tier 4.
+- Sports hosts live in `sports-hosts.ts`. Leagues, governing bodies and tournament
+  organisers are tier 1; established sports newsrooms and the statistics databases
+  (Basketball-Reference, FBref, HLTV, Sofascore, Oracle's Elixir, ...) are tier 2, because
+  they publish recorded results rather than rewrites; aggregators, fan networks, wikis
+  and betting-preview sites are tier 3. Before this list, every sports run reported
+  0 tier-1 and 0 tier-2 sources: ESPN, NBA.com and HLTV were all "unverified".
 - An explicit `sourceTier` on a document wins. Structured adapters (Pyth, PortWatch,
   frozen underlying quotes) set tier 1 themselves and are never reclassified.
 - `attributedOrigin` reports the outlet a tier 3/4 page credits ("according to the New
@@ -182,6 +191,37 @@ Every module is pure except the adapters (`providers/`, `search/`, `storage/`,
 - The sentence filter in `market-policy.ts` is conservative and complements — never
   replaces — the semantic prompt policy. It is not a guarantee against every paraphrase of
   target odds. Its per-event rules live in `TARGET_LEAK_RULES`, one entry per event shape.
+
+### Games: two-sided sports and esports events
+
+`contest.ts` recognises a game: Gamma marks the event as sports (a `gameId` or a market
+`sportsMarketType`) and two sides come from Gamma's `teams` or from an "A vs. B" title.
+A political "X vs. Y" title is never a game. The 2026-10-26 sports runs showed what the
+generic market path did to games, and four changes follow from them:
+
+- Queries. The generic queries are the title, the title plus the resolution-source URL,
+  "latest developments" and "contrary evidence uncertainty". For "Counter-Strike: G2 vs
+  DENDELE CS (BO3) - PGL Masters Bucharest Group Stage" those are poor searches. Games now
+  search a preview, each side's team news (roster news and stand-ins for esports), and
+  head-to-head form; high effort adds each side's recent results in the competition. US
+  leagues add the league name, because Gamma names NBA teams "Warriors" and "Nuggets".
+  Caller-supplied queries still replace the defaults.
+- Writer context. An NBA game event holds about 300 markets, mostly player props, and the
+  first report spent its opening on prop resolution rules. The writer now sees only the
+  game's moneyline markets with their rules, plus `omittedPropMarkets`.
+- Target odds. Betting previews state the target's own price as moneylines, spreads,
+  "favourite" and "implied probability". `TARGET_LEAK_RULES` had entries only for the
+  Senate, press-secretary and AGI events, so these sentences reached the writer. Games now
+  drop any sentence with betting language (`CONTEST_BETTING`); percentages and
+  "projected starter" survive, because they carry team news rather than odds.
+- Candidates. A soccer game's 1X2 markets carry team names as `groupItemTitle`, which
+  high effort took for candidates and researched with appointment queries. Games skip
+  candidate units and use the game queries for discovery.
+
+Measured on 2026-10-26 with Serper and `qwen3.8:27b` at medium effort, against 0.1.0:
+Warriors-Nuggets went from 19 sources (4 tier-2) and 13 team-news words in the report to
+23 sources (10 tier-2) and 26; G2-DENDELE from 16 sources and 1 team-news word to 24 and
+10. Betting words in the NBA report fell from 7 to 3, and the 3 left were stat lines.
 
 ### Arena extraction
 

@@ -1,3 +1,4 @@
+import { CONTEST_BETTING, contestOf, mainContestMarkets } from "./contest.ts";
 import { isPredictionMarketHost } from "./search/excluded-hosts.ts";
 import type { PolymarketEvent, PolymarketMarket, SourceDocument } from "./types.ts";
 
@@ -18,10 +19,18 @@ export function normalizeMarketEvent(event: PolymarketEvent): PolymarketEvent {
   return { ...event, markets, resolutionSource: event.resolutionSource?.trim() || authorities.join("\n\n") || undefined };
 }
 
+function contextMarkets(event: PolymarketEvent): PolymarketMarket[] {
+  const eligible = (event.markets ?? []).filter(eligibleMarket);
+  return contestOf(event) ? mainContestMarkets(eligible) : eligible;
+}
+
 export function marketContext(event: PolymarketEvent) {
-  const descriptions = [...new Set([event.description, ...(event.markets ?? []).filter(eligibleMarket).map(m => m.description)].filter((text): text is string => !!text))];
+  const kept = contextMarkets(event);
+  const omitted = (event.markets ?? []).filter(eligibleMarket).length - kept.length;
+  const descriptions = [...new Set([event.description, ...kept.map(m => m.description)].filter((text): text is string => !!text))];
   return { title: event.title, rules: descriptions, clarification: event.clarification, clarificationProvenance: event.clarification ? "Caller supplied; publication dates and authenticity unverified" : undefined, resolutionSource: event.resolutionSource, endDate: event.endDate,
-    markets: event.markets?.filter(eligibleMarket).map(m => ({ question: m.question, ruleIndex: m.description ? descriptions.indexOf(m.description) : undefined, createdAt: m.createdAt, endDate: m.endDate, outcomes: m.outcomes })) };
+    markets: kept.map(m => ({ question: m.question, ruleIndex: m.description ? descriptions.indexOf(m.description) : undefined, createdAt: m.createdAt, endDate: m.endDate, outcomes: m.outcomes })),
+    omittedPropMarkets: omitted > 0 ? omitted : undefined };
 }
 
 export function candidateName(m: PolymarketMarket): string {
@@ -39,28 +48,32 @@ const WITHHELD_MARKET_TEXT = "[Market UI withheld to avoid target-odds leakage f
 const WITHHELD_FORECAST_TEXT = "[Target forecast content withheld; use resolution metadata.]";
 
 interface TargetLeakRule {
-  appliesTo(title: string): boolean;
+  appliesTo(event: PolymarketEvent): boolean;
   leaks(sentence: string, source: SourceDocument): boolean;
 }
 
 const TARGET_LEAK_RULES: TargetLeakRule[] = [
   {
-    appliesTo: (title) => /senate/i.test(title) && /(?:control|majority|win the senate)/i.test(title),
+    appliesTo: ({ title }) => /senate/i.test(title) && /(?:control|majority|win the senate)/i.test(title),
     leaks: (sentence, source) => SENATE_CONTROL.test(`${sentence} ${source.title ?? ""}`),
   },
   {
-    appliesTo: (title) => /press secretary/i.test(title),
+    appliesTo: ({ title }) => /press secretary/i.test(title),
     leaks: (sentence) => ODDS_WORDS.test(sentence),
   },
   {
-    appliesTo: (title) => /\bAGI\b/i.test(title),
+    appliesTo: ({ title }) => /\bAGI\b/i.test(title),
     leaks: (sentence) => /\bAGI\b|artificial general intelligence/i.test(sentence) && AGI_ODDS_WORDS.test(sentence),
+  },
+  {
+    appliesTo: (event) => contestOf(event) !== undefined,
+    leaks: (sentence) => CONTEST_BETTING.test(sentence),
   },
 ];
 
 function leaksTargetForecast(sentence: string, source: SourceDocument, event: PolymarketEvent): boolean {
-  if (!FORECAST.test(sentence)) return false;
-  return TARGET_LEAK_RULES.some((rule) => rule.appliesTo(event.title) && rule.leaks(sentence, source));
+  if (!FORECAST.test(sentence) && !CONTEST_BETTING.test(sentence)) return false;
+  return TARGET_LEAK_RULES.some((rule) => rule.appliesTo(event) && rule.leaks(sentence, source));
 }
 
 function isFrozenDependencyQuote(source: SourceDocument, event: PolymarketEvent): boolean {

@@ -1,3 +1,4 @@
+import { contestOf, contestQueries } from "./contest.ts";
 import { candidateName } from "./market-policy.ts";
 import { resolutionQueries, resolutionUnits } from "./resolution-research.ts";
 import type { PolymarketEvent, ResearchMarketRequest, ResearchRun, ResearchUnit, SearchProvider, SourceDocument } from "./types.ts";
@@ -37,6 +38,7 @@ export function initialUnits(event: PolymarketEvent): ResearchUnit[] {
   const resolution = resolutionUnits(event);
   if (resolution) return resolution;
   if (isSenateControlEvent(event)) return [...CLASS_II_2026.map(name => `${name} regular`), ...SPECIAL_ELECTIONS_2026].map(raceUnit);
+  if (contestOf(event)) return [];
   const candidates = [...new Set((event.markets ?? []).map(candidateName).filter(name => name && !PLACEHOLDER_CANDIDATE.test(name)))];
   return candidates.length > 1 ? candidates.map(name => candidateUnit(event, name, false)) : [];
 }
@@ -63,6 +65,8 @@ function candidateDiscovery(title: string): string[] {
 export function discoveryQueries(event: PolymarketEvent): string[] {
   const resolution = resolutionQueries(event);
   if (resolution) return resolution;
+  const contest = contestOf(event);
+  if (contest) return contestQueries(contest, "high");
   if (/senate/i.test(event.title) && /2026/.test(event.title)) return SENATE_DISCOVERY;
   if (initialUnits(event).some(unit => unit.kind === "candidate")) return candidateDiscovery(event.title);
   if (/\bAGI\b/.test(event.title)) return AGI_DISCOVERY;
@@ -116,11 +120,17 @@ export function dependencyQueries(raw: unknown): string[] | undefined {
 
 const MAX_QUERIES = 8;
 
-export function retrievalQueries(event: PolymarketEvent, request: ResearchMarketRequest, topicMode: boolean): string[] {
-  const effort = request.effort ?? "low";
+function defaultQueries(event: PolymarketEvent, effort: "low" | "medium" | "high", topicMode: boolean): string[] {
+  const contest = topicMode ? undefined : contestOf(event);
+  if (contest) return contestQueries(contest, effort);
   const defaults = !topicMode && effort === "high" ? discoveryQueries(event) : [event.title, `${event.title} ${event.resolutionSource ?? "primary sources"}`];
   if (effort !== "low") defaults.push(`${event.title} latest developments`, `${event.title} contrary evidence uncertainty`);
   if (effort === "high") defaults.push(`${event.title} historical data methodology`, `${event.title} limitations revisions alternative explanations`);
+  return defaults;
+}
+
+export function retrievalQueries(event: PolymarketEvent, request: ResearchMarketRequest, topicMode: boolean): string[] {
+  const defaults = defaultQueries(event, request.effort ?? "low", topicMode);
   const requested = request.queries?.length ? request.queries : defaults;
   return [...new Set(requested.map(query => query.trim()).filter(Boolean))].slice(0, MAX_QUERIES);
 }
