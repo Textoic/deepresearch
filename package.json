@@ -28,7 +28,7 @@
     }
   },
   "bin": {
-    "budget-research": "./dist/cli.js"
+    "budget-research": "dist/cli.js"
   },
   "files": [
     "dist",
